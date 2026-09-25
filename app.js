@@ -6,7 +6,7 @@
   const qsa = s => [...document.querySelectorAll(s)];
 
   let state = {
-    user:null, profile:null, section:"week", person:"shared",
+    user:null, profile:null, section:"week", person:"me",
     weekStart: startOfWeek(new Date()), tasks:[], requests:[], templates:[],
     demo: !hasSupabase, authMode:"login"
   };
@@ -24,7 +24,7 @@
 
   function uid(){return crypto.randomUUID ? crypto.randomUUID() : Date.now()+"-"+Math.random();}
   function startOfWeek(d){ const x=new Date(d); const day=(x.getDay()+6)%7; x.setDate(x.getDate()-day); x.setHours(0,0,0,0); return x; }
-  function iso(d){return new Date(d).toISOString().slice(0,10)}
+  function iso(d){const x=new Date(d);return `${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,"0")}-${String(x.getDate()).padStart(2,"0")}`}
   function esc(s=""){return String(s).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]))}
   function fmtDate(s){return new Intl.DateTimeFormat("ru-RU",{day:"numeric",month:"short"}).format(new Date(s+"T00:00:00"))}
   function toast(msg){$("toast").textContent=msg;$("toast").classList.add("show");setTimeout(()=>$("toast").classList.remove("show"),2500)}
@@ -33,20 +33,40 @@
   function minutes(t){return Number(t.duration)||60}
 
   function currentUserId(){return state.user?.id || "demo-vadim";}
-
+  function otherId(){return currentUserId()==="demo-sonya"?"demo-vadim":"demo-sonya"}
   async function getOtherUser(){
-    if(state.demo){
-      const id=currentUserId();
-      return demoData.profiles.find(p=>p.id!==id)||null;
-    }
-    const {data,error}=await sb.from("profiles")
-      .select("id,display_name,email")
-      .neq("id",currentUserId())
-      .order("created_at",{ascending:true})
-      .limit(1)
-      .maybeSingle();
+    if(state.demo)return demoData.profiles.find(p=>p.id!==currentUserId())||null;
+    const {data,error}=await sb.from("profiles").select("id,display_name,email").neq("id",currentUserId()).order("created_at",{ascending:true}).limit(1).maybeSingle();
     if(error){toast(error.message);return null}
     return data||null;
+  }
+
+  function notificationSettings(){
+    return {enabled:localStorage.getItem("week-notifications") === "1", lead:Number(localStorage.getItem("week-notification-lead")||15)};
+  }
+  function saveNotificationSettings(){
+    localStorage.setItem("week-notifications", $("notificationsEnabled").checked ? "1" : "0");
+    localStorage.setItem("week-notification-lead", $("notificationLead").value);
+  }
+  async function enableNotifications(){
+    if(!("Notification" in window)){toast("Этот браузер не поддерживает уведомления");return false}
+    const permission=await Notification.requestPermission();
+    if(permission!=="granted"){toast("Разрешение на уведомления не выдано");return false}
+    $("notificationsEnabled").checked=true; saveNotificationSettings(); scheduleNotifications(); toast("Уведомления включены"); return true;
+  }
+  function scheduleNotifications(){
+    if(window.__weekTimers)window.__weekTimers.forEach(clearTimeout); window.__weekTimers=[];
+    const cfg=notificationSettings();
+    if(!cfg.enabled || !("Notification" in window) || Notification.permission!=="granted")return;
+    const now=Date.now(); const today=iso(new Date());
+    state.tasks.filter(t=>t.date===today && t.start_time && t.status!=="done").forEach(t=>{
+      const [h,m]=t.start_time.slice(0,5).split(":").map(Number);
+      const when=new Date(); when.setHours(h,m,0,0); when.setMinutes(when.getMinutes()-cfg.lead);
+      const delay=when.getTime()-now;
+      if(delay>0 && delay<24*60*60*1000){
+        window.__weekTimers.push(setTimeout(()=>{new Notification("week.",{body:`Через ${cfg.lead} мин: ${t.title}`,tag:`week-${t.id}`});},delay));
+      }
+    });
   }
 
   async function boot(){
@@ -69,6 +89,7 @@
     state.tasks=demoData.tasks.filter(t=>t.owner_id===currentUserId()||t.visibility==="shared");
     state.requests=demoData.requests.filter(r=>r.to_user_id===currentUserId());
     state.templates=demoData.templates;
+    scheduleNotifications();
   }
   function saveDemo(){localStorage.setItem("week-demo",JSON.stringify(demoData))}
   function showAuth(){$("authView").classList.remove("hidden");$("appView").classList.add("hidden")}
@@ -84,33 +105,18 @@
       const ins=await sb.from("profiles").insert({id:user.id,display_name:name,email:user.email}).select().single();
       profile=ins.data;
     }
-    if(!profile){toast("Не удалось создать профиль");return}
     state.profile=profile;
     await reloadCloud();
-    setupRealtime();
     showApp();
   }
   async function reloadCloud(){
     if(state.demo){loadDemo();return}
-    const [tasksRes,requestsRes,templatesRes]=await Promise.all([
-      sb.from("tasks").select("*").order("date").order("start_time"),
-      sb.from("task_requests").select("*").eq("to_user_id",state.user.id).eq("status","pending").order("created_at",{ascending:false}),
-      sb.from("task_templates").select("*").eq("user_id",state.user.id).order("created_at",{ascending:false})
-    ]);
-    if(tasksRes.error){toast(tasksRes.error.message);return}
-    if(requestsRes.error){toast(requestsRes.error.message);return}
-    if(templatesRes.error){toast(templatesRes.error.message);return}
-    state.tasks=tasksRes.data||[];state.requests=requestsRes.data||[];state.templates=templatesRes.data||[];
+    const {data:tasks}=await sb.from("tasks").select("*").order("date").order("start_time");
+    const {data:requests}=await sb.from("task_requests").select("*").eq("to_user_id",state.user.id).eq("status","pending").order("created_at",{ascending:false});
+    const {data:templates}=await sb.from("task_templates").select("*").eq("user_id",state.user.id).order("created_at",{ascending:false});
+    state.tasks=tasks||[];state.requests=requests||[];state.templates=templates||[];
+    scheduleNotifications();
     $("requestBadge").textContent=state.requests.length;$("requestBadge").classList.toggle("hidden",!state.requests.length);
-  }
-
-  function setupRealtime(){
-    if(state.demo||!sb||!state.user)return;
-    if(state.realtimeChannel)sb.removeChannel(state.realtimeChannel);
-    state.realtimeChannel=sb.channel(`week-${state.user.id}`)
-      .on("postgres_changes",{event:"*",schema:"public",table:"tasks"},async()=>{await reloadCloud();renderAll()})
-      .on("postgres_changes",{event:"*",schema:"public",table:"task_requests",filter:`to_user_id=eq.${state.user.id}`},async()=>{await reloadCloud();renderRequests()})
-      .subscribe();
   }
 
   function bindStatic(){
@@ -133,6 +139,10 @@
     $("saveSettings").onclick=saveSettings;
     $("exportBtn").onclick=exportData;
     $("importFile").onchange=importData;
+    $("notificationsEnabled").onchange=async e=>{if(e.target.checked){await enableNotifications()}else{saveNotificationSettings();scheduleNotifications()}};
+    $("notificationLead").onchange=()=>{saveNotificationSettings();scheduleNotifications()};
+    $("enableNotifications").onclick=enableNotifications;
+    if("Notification" in window && Notification.permission==="granted"){$("notificationsEnabled").checked=notificationSettings().enabled;}
   }
 
   async function authSubmit(e){
@@ -169,6 +179,7 @@
     let tasks=state.tasks.filter(t=>t.status!=="archived");
     if(state.person==="me")tasks=tasks.filter(t=>t.owner_id===currentUserId()&&t.visibility!=="shared");
     if(state.person==="shared")tasks=tasks.filter(t=>t.visibility==="shared");
+    if(state.person==="other")tasks=[];
     return tasks;
   }
 
@@ -208,7 +219,7 @@
     $("taskDescription").value=task?.description||"";
     $("taskDate").value=task?.date||iso(new Date());
     $("taskTime").value=task?.start_time?.slice(0,5)||"";
-    $("taskDuration").value=task?.duration||getSettings().defaultDuration||60;
+    $("taskDuration").value=task?.duration||Number(localStorage.getItem("week-default-duration")||60);
     $("taskDeadline").value=task?.deadline?new Date(task.deadline).toISOString().slice(0,16):"";
     $("taskCategory").value=task?.category||"Школа";
     $("taskPriority").value=task?.priority||"mandatory";
@@ -223,32 +234,27 @@
 
   async function saveTask(e){
     e.preventDefault();
-    const id=$("taskId").value, dest=qs('input[name="destination"]:checked').value;
+    const id=$("taskId").value;
+    const dest=qs('input[name="destination"]:checked').value;
     const base={
-      title:$("taskTitle").value.trim(),description:$("taskDescription").value.trim(),date:$("taskDate").value,start_time:$("taskTime").value||null,
+      title:$("taskTitle").value.trim(),description:$("taskDescription").value.trim()||null,
+      date:$("taskDate").value,start_time:$("taskTime").value||null,
       duration:Number($("taskDuration").value)||60,deadline:$("taskDeadline").value?new Date($("taskDeadline").value).toISOString():null,
       category:$("taskCategory").value,priority:$("taskPriority").value,fixed_time:$("taskFixed").checked,
       recurrence:$("taskRecurring").checked?$("taskRecurrence").value:null
     };
-    if(!base.title||!base.date)return;
+    if(!base.title)return;
+    localStorage.setItem("week-default-duration", String(base.duration));
     if(state.demo){
       if(id){const t=demoData.tasks.find(x=>x.id===id);if(t)Object.assign(t,base)}
-      else if(dest==="proposal"){
-        const other=demoData.profiles.find(p=>p.id!==currentUserId());
-        if(!other){toast("Нет второго пользователя");return}
-        demoData.requests.push({id:uid(),from_user_id:currentUserId(),to_user_id:other.id,...base,status:"pending",created_at:new Date().toISOString()});
-      }else demoData.tasks.push({id:uid(),owner_id:currentUserId(),visibility:dest==="shared"?"shared":"private",status:"open",...base});
+      else if(dest==="proposal"){demoData.requests.push({id:uid(),from_user_id:currentUserId(),to_user_id:otherId(),title:base.title,description:base.description,date:base.date,start_time:base.start_time,duration:base.duration,category:base.category,priority:base.priority,status:"pending",created_at:new Date().toISOString()})}
+      else demoData.tasks.push({id:uid(),owner_id:currentUserId(),visibility:dest==="shared"?"shared":"private",status:"open",...base});
       saveDemo();loadDemo();
     }else{
-      if(id){
-        const existing=state.tasks.find(t=>t.id===id);
-        let query=sb.from("tasks").update(base).eq("id",id);
-        if(existing?.visibility!=="shared")query=query.eq("owner_id",state.user.id);
-        const {error}=await query;
-        if(error){toast(error.message);return}
-      }else if(dest==="proposal"){
+      if(id) await sb.from("tasks").update(base).eq("id",id).eq("owner_id",state.user.id);
+      else if(dest==="proposal"){
         const other=await getOtherUser();
-        if(!other){toast("Не найден второй пользователь. Сначала зарегистрируйте второй аккаунт.");return}
+        if(!other){toast("Второй пользователь ещё не зарегистрирован");return}
         const {error}=await sb.from("task_requests").insert({...base,from_user_id:state.user.id,to_user_id:other.id,status:"pending"});
         if(error){toast(error.message);return}
       }else{
@@ -263,7 +269,7 @@
   window.weekToggle=async(id,checked)=>{
     if(state.demo){const t=demoData.tasks.find(x=>x.id===id);if(t)t.status=checked?"done":"open";saveDemo();loadDemo()}
     else await sb.from("tasks").update({status:checked?"done":"open"}).eq("id",id);
-    await reloadCloud();renderWeek();
+    await reloadCloud();renderWeek();scheduleNotifications();
   };
   window.weekEdit=id=>{const t=state.tasks.find(x=>x.id===id);if(t)openTask(t)};
   window.weekDelete=async id=>{
@@ -284,17 +290,11 @@
   }
   window.acceptRequest=async id=>{
     const r=state.requests.find(x=>x.id===id);if(!r)return;
-    if(state.demo){
-      demoData.requests=demoData.requests.filter(x=>x.id!==id);
-      demoData.tasks.push({id:uid(),owner_id:state.user.id,visibility:"shared",status:"open",title:r.title,description:r.description,date:r.date,start_time:r.start_time,duration:r.duration,deadline:r.deadline||null,category:r.category,priority:r.priority,fixed_time:r.fixed_time||false,recurrence:r.recurrence||null});
-      saveDemo();loadDemo()
-    }else{
-      // The recipient creates the shared task, because the RLS insert policy
-      // permits a user to insert only a task owned by that same user.
-      const {error}=await sb.from("tasks").insert({owner_id:state.user.id,visibility:"shared",status:"open",title:r.title,description:r.description,date:r.date,start_time:r.start_time,duration:r.duration,deadline:r.deadline||null,category:r.category,priority:r.priority,fixed_time:r.fixed_time||false,recurrence:r.recurrence||null});
+    if(state.demo){demoData.requests=demoData.requests.filter(x=>x.id!==id);demoData.tasks.push({id:uid(),owner_id:r.from_user_id,visibility:"shared",status:"open",title:r.title,description:r.description,date:r.date,start_time:r.start_time,duration:r.duration,category:r.category,priority:r.priority});saveDemo();loadDemo()}
+    else{
+      const {error}=await sb.from("tasks").insert({owner_id:r.from_user_id,visibility:"shared",status:"open",title:r.title,description:r.description,date:r.date,start_time:r.start_time,duration:r.duration,category:r.category,priority:r.priority});
       if(error){toast(error.message);return}
-      const {error:requestError}=await sb.from("task_requests").update({status:"accepted"}).eq("id",id).eq("to_user_id",state.user.id);
-      if(requestError){toast(requestError.message);return}
+      await sb.from("task_requests").update({status:"accepted"}).eq("id",id).eq("to_user_id",state.user.id);
       await reloadCloud();
     }
     renderAll();toast("Предложение принято");
@@ -323,7 +323,7 @@
   async function saveTemplate(e){
     e.preventDefault();
     const t={id:uid(),user_id:currentUserId(),title:$("templateTitle").value.trim(),category:$("templateCategory").value,duration:Number($("templateDuration").value)||60,priority:$("templatePriority").value};
-    if(state.demo){demoData.templates.push(t);saveDemo();loadDemo()}else{const {error}=await sb.from("task_templates").insert({user_id:state.user.id,title:t.title,category:t.category,duration:t.duration,priority:t.priority});if(error){toast(error.message);return}await reloadCloud()}
+    if(state.demo){demoData.templates.push(t);saveDemo();loadDemo()}else{const {error}=await sb.from("task_templates").insert({...t,id:undefined});if(error){toast(error.message);return}await reloadCloud()}
     $("templateModal").classList.add("hidden");renderTemplates();toast("Шаблон сохранён");
   }
 
@@ -342,56 +342,27 @@
     $("categoryStats").innerHTML=Object.entries(cats).sort((a,b)=>b[1]-a[1]).map(([c,v])=>`<div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line)"><span>${esc(c)}</span><strong>${Math.floor(v/60)}ч ${v%60}м</strong></div>`).join("")||"<p class='muted'>Нет задач.</p>";
   }
 
-  function settingsKey(){return `week-settings-${currentUserId()}`}
-  function getSettings(){try{return JSON.parse(localStorage.getItem(settingsKey())||"{}")}catch{return {}}}
   function renderSettings(){
-    const settings=getSettings();
     $("settingsName").value=state.profile?.display_name||"";
-    $("defaultDuration").value=settings.defaultDuration||60;
+    $("defaultDuration").value=localStorage.getItem("week-default-duration")||60;
+    const ns=notificationSettings();
+    if($("notificationsEnabled")){ $("notificationsEnabled").checked=ns.enabled; $("notificationLead").value=String(ns.lead); }
   }
   async function saveSettings(){
     const name=$("settingsName").value.trim()||"Пользователь";
-    const defaultDuration=Math.max(5,Number($("defaultDuration").value)||60);
-    if(state.demo){state.profile.display_name=name;const p=demoData.profiles.find(x=>x.id===currentUserId());if(p)p.display_name=name;saveDemo()}
-    else{
-      const {error}=await sb.from("profiles").update({display_name:name}).eq("id",state.user.id);
-      if(error){toast(error.message);return}
-      state.profile.display_name=name;
-    }
-    localStorage.setItem(settingsKey(),JSON.stringify({defaultDuration}));
+    localStorage.setItem("week-default-duration", String(Number($("defaultDuration").value)||60));
+    saveNotificationSettings();
+    if(state.demo){state.profile.display_name=name;demoData.profiles[0].display_name=name;saveDemo()}else{await sb.from("profiles").update({display_name:name}).eq("id",state.user.id);state.profile.display_name=name}
     renderAll();toast("Настройки сохранены");
   }
   function exportData(){
     const data={exported_at:new Date().toISOString(),profile:state.profile,tasks:state.tasks,requests:state.requests,templates:state.templates};
     const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:"application/json"}));a.download="week-backup.json";a.click();URL.revokeObjectURL(a.href);
   }
-  async function importData(e){
-    const file=e.target.files[0];if(!file)return;
-    const reader=new FileReader();
-    reader.onload=async()=>{
-      try{
-        const data=JSON.parse(reader.result);
-        if(!Array.isArray(data.tasks)){toast("Неверный файл");return}
-        if(state.demo){
-          demoData.tasks.push(...data.tasks.map(t=>({...t,owner_id:currentUserId()})));
-          saveDemo();loadDemo();
-        }else{
-          const rows=data.tasks.map(t=>({
-            owner_id:state.user.id,visibility:t.visibility==="shared"?"shared":"private",status:t.status||"open",
-            title:t.title,description:t.description||"",date:t.date,start_time:t.start_time||null,duration:Number(t.duration)||60,
-            deadline:t.deadline||null,category:t.category||"Другое",priority:t.priority||"optional",fixed_time:!!t.fixed_time,recurrence:t.recurrence||null
-          }));
-          const {error}=await sb.from("tasks").insert(rows);
-          if(error){toast(error.message);return}
-          await reloadCloud();
-        }
-        renderAll();toast(`Импортировано задач: ${data.tasks.length}`);
-      }catch{toast("Не удалось прочитать JSON")}
-      e.target.value="";
-    };
-    reader.readAsText(file);
+  function importData(e){
+    const file=e.target.files[0];if(!file)return;const reader=new FileReader();reader.onload=()=>{try{const data=JSON.parse(reader.result);if(Array.isArray(data.tasks)){demoData.tasks.push(...data.tasks);saveDemo();loadDemo();renderAll();toast("Импортировано")}else toast("Неверный файл")}catch{toast("Не удалось прочитать JSON")}};reader.readAsText(file);
   }
 
-
+  setInterval(async()=>{if(!state.demo && state.user){const before=state.requests.length;await reloadCloud();if(state.requests.length>before && "Notification" in window && Notification.permission==="granted" && notificationSettings().enabled)new Notification("week.",{body:"Новое предложение задачи",tag:"week-request"});renderRequests();}},60000);
   boot();
 })();

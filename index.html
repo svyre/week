@@ -2,7 +2,11 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#111318">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="manifest.webmanifest">
   <title>week. — планировщик</title>
   <link rel="stylesheet" href="style.css">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -35,11 +39,11 @@
     <aside class="sidebar">
       <div class="brand">week<span>.</span></div>
       <nav>
-        <button class="nav-btn active" data-section="week">Неделя</button>
-        <button class="nav-btn" data-section="requests">Предложения <span id="requestBadge" class="badge hidden">0</span></button>
-        <button class="nav-btn" data-section="templates">Частые задачи</button>
-        <button class="nav-btn" data-section="stats">Статистика</button>
-        <button class="nav-btn" data-section="settings">Настройки</button>
+        <button class="nav-btn active" data-section="week"><span>⌂</span><span>Неделя</span></button>
+        <button class="nav-btn" data-section="requests"><span>♡</span><span>Предложения</span><span id="requestBadge" class="badge hidden">0</span></button>
+        <button class="nav-btn" data-section="templates"><span>✦</span><span>Шаблоны</span></button>
+        <button class="nav-btn" data-section="stats"><span>↗</span><span>Статистика</span></button>
+        <button class="nav-btn" data-section="settings"><span>⚙</span><span>Настройки</span></button>
       </nav>
       <div class="profile-box">
         <div class="avatar" id="avatar">?</div>
@@ -56,7 +60,7 @@
         </div>
         <div class="top-actions">
           <button id="todayBtn" class="secondary">Сегодня</button>
-          <button id="addTaskBtn" class="primary">+ Добавить задачу</button>
+          <button id="addTaskBtn" class="primary add-task">+ Добавить задачу</button>
         </div>
       </header>
 
@@ -104,6 +108,12 @@
         <div class="panel settings-panel">
           <h2>Настройки</h2>
           <label>Имя<input id="settingsName"></label>
+          <div class="settings-card">
+            <div><strong>Уведомления</strong><p class="small muted">Напоминания работают, пока week. открыт. Для уведомлений даже после закрытия понадобится Web Push через сервер.</p></div>
+            <label class="switch"><input id="notificationsEnabled" type="checkbox"><span></span> Включить</label>
+            <label>Напоминать за<select id="notificationLead"><option value="5">5 минут</option><option value="10">10 минут</option><option value="15" selected>15 минут</option><option value="30">30 минут</option></select></label>
+            <button id="enableNotifications" class="secondary">Разрешить уведомления</button>
+          </div>
           <label>Стандартная длительность (мин)<input id="defaultDuration" type="number" min="5" step="5" value="60"></label>
           <button id="saveSettings" class="primary">Сохранить</button>
           <hr>
@@ -169,8 +179,8 @@
     </div>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="config.js"></script>
+  <script>if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{}));}</script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -1,0 +1,11 @@
+{
+  "name":"week. — планировщик",
+  "short_name":"week.",
+  "start_url":"./",
+  "display":"standalone",
+  "background_color":"#f4f3ef",
+  "theme_color":"#111318",
+  "lang":"ru",
+  "description":"Минималистичный планировщик недели для двоих",
+  "icons":[]
+}
