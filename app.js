@@ -41,6 +41,55 @@
     return data||null;
   }
 
+  function urlBase64ToUint8Array(base64String){
+    const padding="=".repeat((4-base64String.length%4)%4);
+    const base64=(base64String+padding).replace(/-/g,"+").replace(/_/g,"/");
+    const raw=atob(base64);
+    return Uint8Array.from([...raw].map(c=>c.charCodeAt(0)));
+  }
+
+  async function registerPushNotifications(){
+    if(state.demo){toast("Push-уведомления доступны только в аккаунте");return false}
+    if(!("serviceWorker" in navigator) || !("PushManager" in window)){toast("Этот браузер не поддерживает push-уведомления");return false}
+    if(!window.VAPID_PUBLIC_KEY){toast("Не настроен VAPID_PUBLIC_KEY");return false}
+    const permission=await Notification.requestPermission();
+    if(permission!=="granted"){toast("Разрешение на уведомления не выдано");return false}
+    const reg=await navigator.serviceWorker.ready;
+    let sub=await reg.pushManager.getSubscription();
+    if(!sub) sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:urlBase64ToUint8Array(window.VAPID_PUBLIC_KEY)});
+    const json=sub.toJSON();
+    const cfg=notificationSettings();
+    const {error}=await sb.from("push_subscriptions").upsert({
+      user_id:state.user.id, endpoint:json.endpoint, p256dh:json.keys?.p256dh, auth:json.keys?.auth,
+      lead_minutes:cfg.lead, timezone:Intl.DateTimeFormat().resolvedOptions().timeZone, enabled:true, updated_at:new Date().toISOString()
+    },{onConflict:"user_id,endpoint"});
+    if(error){toast(error.message);return false}
+    $("notificationsEnabled").checked=true;saveNotificationSettings();
+    localStorage.setItem("week-push-active","1");
+    toast("Push-уведомления включены");return true;
+  }
+
+  async function syncPushSubscription(){
+    if(state.demo||!state.user||!sb||!("serviceWorker" in navigator)||!("PushManager" in window))return;
+    try{
+      const reg=await navigator.serviceWorker.ready;
+      const sub=await reg.pushManager.getSubscription();
+      if(!sub){localStorage.removeItem("week-push-active");return;}
+      localStorage.setItem("week-push-active","1");
+      const json=sub.toJSON(),cfg=notificationSettings();
+      await sb.from("push_subscriptions").upsert({user_id:state.user.id,endpoint:json.endpoint,p256dh:json.keys?.p256dh,auth:json.keys?.auth,lead_minutes:cfg.lead,timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,enabled:cfg.enabled,updated_at:new Date().toISOString()},{onConflict:"user_id,endpoint"});
+    }catch{}
+  }
+
+  async function disablePushNotifications(){
+    if(state.demo)return;
+    try{
+      const reg=await navigator.serviceWorker.ready;const sub=await reg.pushManager.getSubscription();
+      if(sub){await sb.from("push_subscriptions").delete().eq("user_id",state.user.id).eq("endpoint",sub.endpoint);await sub.unsubscribe();}
+      localStorage.removeItem("week-push-active");
+    }catch{}
+  }
+
   function notificationSettings(){
     return {enabled:localStorage.getItem("week-notifications") === "1", lead:Number(localStorage.getItem("week-notification-lead")||15)};
   }
@@ -52,12 +101,15 @@
     if(!("Notification" in window)){toast("Этот браузер не поддерживает уведомления");return false}
     const permission=await Notification.requestPermission();
     if(permission!=="granted"){toast("Разрешение на уведомления не выдано");return false}
-    $("notificationsEnabled").checked=true; saveNotificationSettings(); scheduleNotifications(); toast("Уведомления включены"); return true;
+    $("notificationsEnabled").checked=true; saveNotificationSettings(); scheduleNotifications();
+    if(!state.demo) await registerPushNotifications(); else toast("Уведомления включены");
+    return true;
   }
   function scheduleNotifications(){
     if(window.__weekTimers)window.__weekTimers.forEach(clearTimeout); window.__weekTimers=[];
     const cfg=notificationSettings();
     if(!cfg.enabled || !("Notification" in window) || Notification.permission!=="granted")return;
+    if(!state.demo && localStorage.getItem("week-push-active")==="1")return;
     const now=Date.now(); const today=iso(new Date());
     state.tasks.filter(t=>t.date===today && t.start_time && t.status!=="done").forEach(t=>{
       const [h,m]=t.start_time.slice(0,5).split(":").map(Number);
@@ -108,6 +160,7 @@
     state.profile=profile;
     await reloadCloud();
     showApp();
+    await syncPushSubscription();
   }
   async function reloadCloud(){
     if(state.demo){loadDemo();return}
@@ -139,8 +192,8 @@
     $("saveSettings").onclick=saveSettings;
     $("exportBtn").onclick=exportData;
     $("importFile").onchange=importData;
-    $("notificationsEnabled").onchange=async e=>{if(e.target.checked){await enableNotifications()}else{saveNotificationSettings();scheduleNotifications()}};
-    $("notificationLead").onchange=()=>{saveNotificationSettings();scheduleNotifications()};
+    $("notificationsEnabled").onchange=async e=>{if(e.target.checked){await enableNotifications()}else{saveNotificationSettings();scheduleNotifications();await disablePushNotifications()}};
+    $("notificationLead").onchange=async()=>{saveNotificationSettings();scheduleNotifications();await syncPushSubscription()};
     $("enableNotifications").onclick=enableNotifications;
     if("Notification" in window && Notification.permission==="granted"){$("notificationsEnabled").checked=notificationSettings().enabled;}
   }
@@ -352,6 +405,7 @@
     const name=$("settingsName").value.trim()||"Пользователь";
     localStorage.setItem("week-default-duration", String(Number($("defaultDuration").value)||60));
     saveNotificationSettings();
+    await syncPushSubscription();
     if(state.demo){state.profile.display_name=name;demoData.profiles[0].display_name=name;saveDemo()}else{await sb.from("profiles").update({display_name:name}).eq("id",state.user.id);state.profile.display_name=name}
     renderAll();toast("Настройки сохранены");
   }
