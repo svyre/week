@@ -7,7 +7,7 @@
 
   let state = {
     user:null, profile:null, section:"week", person:"me",
-    weekStart: startOfWeek(new Date()), tasks:[], requests:[], templates:[],
+    weekStart: startOfWeek(new Date()), tasks:[], requests:[], templates:[], timeLogs:[], activeTimer:null,
     demo: !hasSupabase, authMode:"login"
   };
 
@@ -19,7 +19,7 @@
     tasks:[], requests:[], templates:[
       {id:"t1",title:"Сделать домашку",category:"Школа",duration:60,priority:"mandatory"},
       {id:"t2",title:"Подготовка к репетитору",category:"Репетитор",duration:45,priority:"desirable"}
-    ]
+    ], timeLogs:[]
   };
 
   function uid(){return crypto.randomUUID ? crypto.randomUUID() : Date.now()+"-"+Math.random();}
@@ -31,6 +31,52 @@
   function priorityLabel(p){return {mandatory:"обязательная",desirable:"желательная",optional:"необязательная"}[p]||p}
   function dayName(i){return ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"][i]}
   function minutes(t){return Number(t.duration)||60}
+  function toMin(t){const [h,m]=t.slice(0,5).split(":").map(Number);return h*60+(m||0)}
+
+  const GRID_START_HOUR=6, GRID_END_HOUR=23, PX_PER_HOUR=56;
+
+  // Раскладывает задачи одного дня по колонкам-дорожкам (lanes), если время пересекается.
+  function layoutDayTasks(dayTasks){
+    const timed=dayTasks.filter(t=>t.start_time).sort((a,b)=>toMin(a.start_time)-toMin(b.start_time));
+    const lanesEnd=[];
+    const placed=timed.map(t=>{
+      const start=toMin(t.start_time), end=start+minutes(t);
+      let lane=lanesEnd.findIndex(e=>e<=start);
+      if(lane===-1){lane=lanesEnd.length;lanesEnd.push(end)}else lanesEnd[lane]=end;
+      return {...t,_start:start,_end:end,_lane:lane};
+    });
+    const laneCount=lanesEnd.length||1;
+    return placed.map(p=>({...p,_laneCount:laneCount}));
+  }
+
+  // Разворачивает повторяющиеся задачи в отдельные "виртуальные" вхождения на нужном
+  // диапазоне дат. Сама запись в базе остаётся одна — редактирование/удаление/чек
+  // применяются ко всей серии.
+  function expandOccurrences(tasks,rangeStart,days){
+    const out=[];
+    for(const t of tasks){
+      if(!t.recurrence){out.push(t);continue}
+      const base=new Date(t.date+"T00:00:00");
+      for(let i=0;i<days;i++){
+        const d=new Date(rangeStart);d.setDate(d.getDate()+i);
+        if(d<base)continue;
+        let matches=false;
+        if(t.recurrence==="daily")matches=true;
+        else if(t.recurrence==="weekly")matches=d.getDay()===base.getDay();
+        else if(t.recurrence==="weekdays")matches=d.getDay()!==0&&d.getDay()!==6;
+        if(!matches)continue;
+        const ds=iso(d);
+        if(ds===t.date)out.push(t);
+        else out.push({...t,date:ds,id:`${t.id}::${ds}`,seriesId:t.id,virtual:true});
+      }
+    }
+    return out;
+  }
+
+  function trackedMinutesFor(taskId){
+    return state.timeLogs.filter(l=>l.task_id===taskId&&l.ended_at)
+      .reduce((a,l)=>a+Math.round((new Date(l.ended_at)-new Date(l.started_at))/60000),0);
+  }
 
   function currentUserId(){return state.user?.id || "demo-vadim";}
   function otherId(){return currentUserId()==="demo-sonya"?"demo-vadim":"demo-sonya"}
@@ -39,6 +85,65 @@
     const {data,error}=await sb.from("profiles").select("id,display_name,email").neq("id",currentUserId()).order("created_at",{ascending:true}).limit(1).maybeSingle();
     if(error){toast(error.message);return null}
     return data||null;
+  }
+
+  function restoreActiveTimer(){
+    const open=state.timeLogs.find(l=>!l.ended_at);
+    state.activeTimer=open?{taskId:open.task_id,logId:open.id,startedAt:open.started_at}:null;
+  }
+
+  window.toggleTimer=async taskId=>{
+    if(state.activeTimer && state.activeTimer.taskId===taskId){ await stopTimer(); }
+    else{ if(state.activeTimer) await stopTimer(); await startTimer(taskId); }
+  };
+
+  async function startTimer(taskId){
+    const startedAt=new Date().toISOString();
+    if(state.demo){
+      const log={id:uid(),task_id:taskId,user_id:currentUserId(),started_at:startedAt,ended_at:null};
+      demoData.timeLogs.push(log);saveDemo();loadDemo();
+    }else{
+      const {error}=await sb.from("time_logs").insert({task_id:taskId,user_id:state.user.id,started_at:startedAt});
+      if(error){toast(error.message);return}
+      await reloadCloud();
+    }
+    renderAll();
+  }
+
+  async function stopTimer(){
+    if(!state.activeTimer)return;
+    const {logId}=state.activeTimer;
+    const endedAt=new Date().toISOString();
+    if(state.demo){
+      const log=demoData.timeLogs.find(l=>l.id===logId);if(log)log.ended_at=endedAt;
+      saveDemo();loadDemo();
+    }else{
+      const {error}=await sb.from("time_logs").update({ended_at:endedAt}).eq("id",logId).eq("user_id",state.user.id);
+      if(error){toast(error.message);return}
+      await reloadCloud();
+    }
+    renderAll();
+  }
+
+  let timerTickInterval=null;
+  function updateTimerBar(){
+    const bar=$("activeTimerBar");if(!bar)return;
+    if(!state.activeTimer){
+      bar.classList.add("hidden");
+      if(timerTickInterval){clearInterval(timerTickInterval);timerTickInterval=null}
+      return;
+    }
+    const task=state.tasks.find(t=>t.id===state.activeTimer.taskId);
+    $("activeTimerTitle").textContent=task?task.title:"Задача";
+    bar.classList.remove("hidden");
+    const tick=()=>{
+      const sec=Math.max(0,Math.floor((Date.now()-new Date(state.activeTimer.startedAt).getTime())/1000));
+      const h=String(Math.floor(sec/3600)).padStart(2,"0"),m=String(Math.floor(sec%3600/60)).padStart(2,"0"),s=String(sec%60).padStart(2,"0");
+      $("activeTimerElapsed").textContent=`${h}:${m}:${s}`;
+    };
+    tick();
+    if(timerTickInterval)clearInterval(timerTickInterval);
+    timerTickInterval=setInterval(tick,1000);
   }
 
   function urlBase64ToUint8Array(base64String){
@@ -152,6 +257,8 @@
     state.tasks=demoData.tasks.filter(t=>t.owner_id===currentUserId()||t.visibility==="shared");
     state.requests=demoData.requests.filter(r=>r.to_user_id===currentUserId());
     state.templates=demoData.templates;
+    state.timeLogs=(demoData.timeLogs||[]).filter(l=>l.user_id===currentUserId());
+    restoreActiveTimer();
     scheduleNotifications();
   }
   function saveDemo(){localStorage.setItem("week-demo",JSON.stringify(demoData))}
@@ -183,10 +290,19 @@
   }
   async function reloadCloud(){
     if(state.demo){loadDemo();return}
-    const {data:tasks}=await sb.from("tasks").select("*").order("date").order("start_time");
-    const {data:requests}=await sb.from("task_requests").select("*").eq("to_user_id",state.user.id).eq("status","pending").order("created_at",{ascending:false});
-    const {data:templates}=await sb.from("task_templates").select("*").eq("user_id",state.user.id).order("created_at",{ascending:false});
-    state.tasks=tasks||[];state.requests=requests||[];state.templates=templates||[];
+    const cutoff=new Date();cutoff.setDate(cutoff.getDate()-60);
+    const [{data:tasks,error:tasksErr},{data:requests,error:reqErr},{data:templates,error:tplErr},{data:logs,error:logsErr}]=await Promise.all([
+      sb.from("tasks").select("*").order("date").order("start_time"),
+      sb.from("task_requests").select("*").eq("to_user_id",state.user.id).eq("status","pending").order("created_at",{ascending:false}),
+      sb.from("task_templates").select("*").eq("user_id",state.user.id).order("created_at",{ascending:false}),
+      sb.from("time_logs").select("*").eq("user_id",state.user.id).gte("started_at",cutoff.toISOString()).order("started_at",{ascending:false})
+    ]);
+    if(tasksErr||reqErr||tplErr||logsErr){
+      console.error("reloadCloud error",{tasksErr,reqErr,tplErr,logsErr});
+      toast(`Ошибка загрузки: ${(tasksErr||reqErr||tplErr||logsErr).message}`);
+    }
+    state.tasks=tasks||[];state.requests=requests||[];state.templates=templates||[];state.timeLogs=logs||[];
+    restoreActiveTimer();
     scheduleNotifications();
     $("requestBadge").textContent=state.requests.length;$("requestBadge").classList.toggle("hidden",!state.requests.length);
   }
@@ -215,6 +331,7 @@
     $("notificationLead").onchange=async()=>{saveNotificationSettings();scheduleNotifications();await syncPushSubscription()};
     $("enableNotifications").onclick=async()=>{await enableNotifications();updateNotificationStatus()};
     if("Notification" in window && Notification.permission==="granted"){$("notificationsEnabled").checked=notificationSettings().enabled;}
+    if($("stopTimerBtn"))$("stopTimerBtn").onclick=stopTimer;
   }
 
   async function authSubmit(e){
@@ -244,7 +361,7 @@
     $("profileEmail").textContent=state.profile?.email||state.user?.email||"";
     $("avatar").textContent=(state.profile?.display_name||"П").slice(0,1).toUpperCase();
     $("weekLabel").textContent=`${fmtDate(iso(state.weekStart))} — ${fmtDate(iso(new Date(state.weekStart.getTime()+6*86400000)))}`;
-    renderWeek();renderRequests();renderTemplates();renderStats();renderSettings();
+    renderWeek();renderRequests();renderTemplates();renderStats();renderSettings();updateTimerBar();
   }
 
   function visibleTasks(){
@@ -257,30 +374,71 @@
 
   function renderWeek(){
     $("weekLabel").textContent=`${fmtDate(iso(state.weekStart))} — ${fmtDate(iso(new Date(state.weekStart.getTime()+6*86400000)))}`;
-    const tasks=visibleTasks();
+    const base=visibleTasks();
+    const tasks=expandOccurrences(base,state.weekStart,7);
+    const trackTop=GRID_START_HOUR*60, trackBottom=GRID_END_HOUR*60;
+    const trackHeight=Math.round((trackBottom-trackTop)/60*PX_PER_HOUR);
+    const hourLines=[...Array(GRID_END_HOUR-GRID_START_HOUR)].map((_,i)=>
+      `<div class="hour-line" style="top:${i*PX_PER_HOUR}px" data-h="${String(GRID_START_HOUR+i).padStart(2,"0")}:00"></div>`
+    ).join("");
+    const todayStr=iso(new Date());
     let html="";
     for(let i=0;i<7;i++){
       const d=new Date(state.weekStart);d.setDate(d.getDate()+i);const ds=iso(d);
       const dayTasks=tasks.filter(t=>t.date===ds);
       const total=dayTasks.reduce((a,t)=>a+minutes(t),0), pct=Math.min(100,total/600*100);
       const level=total>480?"high":total>300?"mid":"low";
+      const untimed=dayTasks.filter(t=>!t.start_time);
+      const placed=layoutDayTasks(dayTasks);
+      const blocks=placed.map(t=>{
+        const top=Math.max(0,(t._start-trackTop)/60*PX_PER_HOUR);
+        const height=Math.max(30,(t._end-t._start)/60*PX_PER_HOUR);
+        const widthPct=100/t._laneCount, leftPct=t._lane*widthPct;
+        return `<div class="track-task" style="top:${top}px;height:${height}px;left:${leftPct}%;width:calc(${widthPct}% - 4px)">${taskBlockHtml(t)}</div>`;
+      }).join("");
+      let nowLine="";
+      if(ds===todayStr){
+        const nowMin=new Date().getHours()*60+new Date().getMinutes();
+        if(nowMin>=trackTop&&nowMin<=trackBottom){
+          nowLine=`<div class="now-line" style="top:${(nowMin-trackTop)/60*PX_PER_HOUR}px"></div>`;
+        }
+      }
       html+=`<div class="day-col">
         <div class="day-head"><span class="day-name">${dayName(i)}</span><span class="day-date">${fmtDate(ds)}</span></div>
         <div class="load-line"><span class="${level}" style="width:${pct}%"></span></div>
         <div class="small muted">${Math.floor(total/60)} ч ${total%60} мин</div>
-        ${dayTasks.sort((a,b)=>(a.start_time||"").localeCompare(b.start_time||"")).map(taskHtml).join("")}
+        ${untimed.length?`<div class="untimed-list">${untimed.map(taskChipHtml).join("")}</div>`:""}
+        <div class="day-track" style="height:${trackHeight}px">${hourLines}${nowLine}${blocks}</div>
       </div>`;
     }
     $("weekGrid").innerHTML=html;
   }
 
-  function taskHtml(t){
+  function timerButtonHtml(actionId){
+    const running=state.activeTimer && state.activeTimer.taskId===actionId;
+    return `<button onclick="window.toggleTimer('${actionId}')" title="${running?"Остановить таймер":"Запустить таймер"}">${running?"⏹":"⏱"}</button>`;
+  }
+
+  function taskChipHtml(t){
     const done=t.status==="done";
+    const actionId=t.seriesId||t.id;
+    const tracked=trackedMinutesFor(actionId);
+    return `<div class="task-chip ${t.priority||"optional"} ${done?"done":""}">
+      <input class="check" type="checkbox" ${done?"checked":""} onchange="window.weekToggle('${actionId}',this.checked)">
+      <span class="task-title">${esc(t.title)}${t.recurrence?" 🔁":""}</span>
+      <span class="task-meta">${minutes(t)} мин${tracked?` • ⏱${tracked}м`:""}${t.visibility==="shared"?" • Общая":""}</span>
+      <span class="task-actions">${timerButtonHtml(actionId)}<button onclick="window.weekEdit('${actionId}')">✎</button><button onclick="window.weekDelete('${actionId}')">🗑</button></span>
+    </div>`;
+  }
+
+  function taskBlockHtml(t){
+    const done=t.status==="done";
+    const actionId=t.seriesId||t.id;
+    const tracked=trackedMinutesFor(actionId);
     return `<article class="task ${t.priority||"optional"} ${done?"done":""}">
-      <div><input class="check" type="checkbox" ${done?"checked":""} onchange="window.weekToggle('${t.id}',this.checked)"><span class="task-title">${esc(t.title)}</span></div>
-      <div class="task-meta"><span>${esc(t.category||"Другое")}</span><span>•</span><span>${minutes(t)} мин</span>${t.start_time?`<span>• ${esc(t.start_time.slice(0,5))}</span>`:""}${t.fixed_time?"<span>• фикс.</span>":""}</div>
-      <div class="task-meta">${priorityLabel(t.priority)}</div>
-      <div class="task-actions"><button onclick="window.weekEdit('${t.id}')">Изменить</button><button onclick="window.weekDelete('${t.id}')">Удалить</button>${t.visibility==="shared"?"<span class='small muted'>Общая</span>":""}</div>
+      <div><input class="check" type="checkbox" ${done?"checked":""} onchange="event.stopPropagation();window.weekToggle('${actionId}',this.checked)"><span class="task-title">${esc(t.title)}${t.recurrence?" 🔁":""}</span></div>
+      <div class="task-meta"><span>${esc(t.start_time.slice(0,5))}</span><span>•</span><span>${minutes(t)} мин</span>${t.fixed_time?"<span>• фикс.</span>":""}${tracked?`<span>• ⏱${tracked}м</span>`:""}</div>
+      <div class="task-actions">${timerButtonHtml(actionId)}<button onclick="window.weekEdit('${actionId}')">✎</button><button onclick="window.weekDelete('${actionId}')">🗑</button>${t.visibility==="shared"?"<span class='small muted'>Общая</span>":""}</div>
     </article>`;
   }
 
@@ -323,7 +481,10 @@
       else demoData.tasks.push({id:uid(),owner_id:currentUserId(),visibility:dest==="shared"?"shared":"private",status:"open",...base});
       saveDemo();loadDemo();
     }else{
-      if(id) await sb.from("tasks").update(base).eq("id",id).eq("owner_id",state.user.id);
+      if(id){
+        const {error}=await sb.from("tasks").update(base).eq("id",id).eq("owner_id",state.user.id);
+        if(error){toast(error.message);return}
+      }
       else if(dest==="proposal"){
         const other=await getOtherUser();
         if(!other){toast("Второй пользователь ещё не зарегистрирован");return}
@@ -335,6 +496,11 @@
       }
       await reloadCloud();
     }
+    if(dest!=="proposal"){
+      state.person=dest==="shared"?"shared":"me";
+      qsa("[data-person]").forEach(x=>x.classList.toggle("active",x.dataset.person===state.person));
+      state.weekStart=startOfWeek(new Date(base.date+"T00:00:00"));
+    }
     $("taskModal").classList.add("hidden");renderAll();toast(id?"Задача обновлена":dest==="proposal"?"Предложение отправлено":"Задача создана");
   }
 
@@ -345,7 +511,8 @@
   };
   window.weekEdit=id=>{const t=state.tasks.find(x=>x.id===id);if(t)openTask(t)};
   window.weekDelete=async id=>{
-    if(!confirm("Удалить задачу?"))return;
+    const t=state.tasks.find(x=>x.id===id);
+    if(!confirm(t?.recurrence?"Удалить всю серию повторяющихся задач?":"Удалить задачу?"))return;
     if(state.demo){demoData.tasks=demoData.tasks.filter(x=>x.id!==id);saveDemo();loadDemo()}else await sb.from("tasks").delete().eq("id",id).eq("owner_id",state.user.id);
     await reloadCloud();renderWeek();toast("Удалено");
   };
@@ -400,14 +567,16 @@
   }
 
   function weekTasksForStats(){
-    const end=new Date(state.weekStart);end.setDate(end.getDate()+7);
-    return state.tasks.filter(t=>new Date(t.date+"T00:00:00")>=state.weekStart&&new Date(t.date+"T00:00:00")<end);
+    return expandOccurrences(state.tasks.filter(t=>t.status!=="archived"),state.weekStart,7);
   }
   function renderStats(){
     const ts=weekTasksForStats(),total=ts.reduce((a,t)=>a+minutes(t),0),done=ts.filter(t=>t.status==="done").length;
     const avg=total/7,loaded=[...Array(7)].map((_,i)=>ts.filter(t=>t.date===iso(new Date(state.weekStart.getTime()+i*86400000))).reduce((a,t)=>a+minutes(t),0));
     const max=loaded.indexOf(Math.max(...loaded));
-    $("statsCards").innerHTML=[["Запланировано",`${Math.floor(total/60)}ч ${total%60}м`],["Задач",ts.length],["Выполнено",`${done}/${ts.length||0}`],["Среднее в день",`${Math.floor(avg/60)}ч ${Math.round(avg%60)}м`]].map(x=>`<div class="stat"><span class="muted">${x[0]}</span><strong>${x[1]}</strong></div>`).join("");
+    const weekEnd=new Date(state.weekStart.getTime()+7*86400000);
+    const trackedMin=state.timeLogs.filter(l=>l.ended_at && new Date(l.started_at)>=state.weekStart && new Date(l.started_at)<weekEnd)
+      .reduce((a,l)=>a+Math.round((new Date(l.ended_at)-new Date(l.started_at))/60000),0);
+    $("statsCards").innerHTML=[["Запланировано",`${Math.floor(total/60)}ч ${total%60}м`],["Задач",ts.length],["Выполнено",`${done}/${ts.length||0}`],["Среднее в день",`${Math.floor(avg/60)}ч ${Math.round(avg%60)}м`],["Отслежено таймером",`${Math.floor(trackedMin/60)}ч ${trackedMin%60}м`]].map(x=>`<div class="stat"><span class="muted">${x[0]}</span><strong>${x[1]}</strong></div>`).join("");
     const maxVal=Math.max(...loaded,1);
     $("statsBars").innerHTML=loaded.map((v,i)=>`<div class="bar-wrap"><div class="small">${Math.round(v/60*10)/10}ч</div><div class="bar" style="height:${Math.max(3,v/maxVal*170)}px"></div><div class="bar-label">${dayName(i)}</div></div>`).join("");
     const cats={};ts.forEach(t=>cats[t.category]=(cats[t.category]||0)+minutes(t));
