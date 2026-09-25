@@ -157,10 +157,6 @@
   function saveDemo(){localStorage.setItem("week-demo",JSON.stringify(demoData))}
   function showAuth(){$("authView").classList.remove("hidden");$("appView").classList.add("hidden")}
   function showApp(){$("authView").classList.add("hidden");$("appView").classList.remove("hidden");renderAll();updateNotificationStatus()}
-  function setTaskModalNav(hidden){
-    document.body.classList.toggle("task-modal-open", !!hidden);
-  }
-
 
   async function updateNotificationStatus(){
     const el=$("notificationStatus");if(!el)return;
@@ -209,10 +205,7 @@
     $("addTemplateBtn").onclick=()=>$("templateModal").classList.remove("hidden");
     $("taskRecurring").onchange=e=>$("recurrenceBox").classList.toggle("hidden",!e.target.checked);
     qsa('input[name="destination"]').forEach(r=>r.onchange=()=>$("proposalHint").classList.toggle("hidden",r.value!=="proposal"));
-    qsa("[data-close]").forEach(b=>b.onclick=()=>{
-      $(b.dataset.close).classList.add("hidden");
-      if(b.dataset.close==="taskModal") setTaskModalNav(false);
-    });
+    qsa("[data-close]").forEach(b=>b.onclick=()=>$(b.dataset.close).classList.add("hidden"));
     $("taskForm").onsubmit=saveTask;
     $("templateForm").onsubmit=saveTemplate;
     $("saveSettings").onclick=saveSettings;
@@ -330,10 +323,7 @@
       else demoData.tasks.push({id:uid(),owner_id:currentUserId(),visibility:dest==="shared"?"shared":"private",status:"open",...base});
       saveDemo();loadDemo();
     }else{
-      if(id){
-        const {error}=await sb.from("tasks").update(base).eq("id",id).eq("owner_id",state.user.id);
-        if(error){toast(`Не удалось сохранить: ${error.message}`);return}
-      }
+      if(id) await sb.from("tasks").update(base).eq("id",id).eq("owner_id",state.user.id);
       else if(dest==="proposal"){
         const other=await getOtherUser();
         if(!other){toast("Второй пользователь ещё не зарегистрирован");return}
@@ -345,7 +335,7 @@
       }
       await reloadCloud();
     }
-    $("taskModal").classList.add("hidden");setTaskModalNav(false);renderAll();toast(id?"Задача обновлена":dest==="proposal"?"Предложение отправлено":"Задача создана");
+    $("taskModal").classList.add("hidden");renderAll();toast(id?"Задача обновлена":dest==="proposal"?"Предложение отправлено":"Задача создана");
   }
 
   window.weekToggle=async(id,checked)=>{
@@ -388,7 +378,7 @@
   };
   window.counterRequest=id=>{
     const r=state.requests.find(x=>x.id===id);if(!r)return;
-    $("taskModal").classList.remove("hidden");setTaskModalNav(true);$("taskModalTitle").textContent="Предложить другое время";
+    $("taskModal").classList.remove("hidden");$("taskModalTitle").textContent="Предложить другое время";
     $("taskId").value="";$("taskTitle").value=r.title;$("taskDescription").value=r.description||"";
     $("taskDate").value=r.date;$("taskTime").value=r.start_time?.slice(0,5)||"";$("taskDuration").value=r.duration||60;
     $("taskCategory").value=r.category||"Другое";$("taskPriority").value=r.priority||"desirable";
