@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>week. — планировщик</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+  <div id="toast" class="toast"></div>
+  <div id="authView" class="auth-screen">
+    <div class="auth-card">
+      <div class="logo">week<span>.</span></div>
+      <p class="muted">Планировщик для Вадима и Сони</p>
+      <div class="tabs auth-tabs">
+        <button class="tab active" data-auth="login">Войти</button>
+        <button class="tab" data-auth="signup">Регистрация</button>
+      </div>
+      <form id="authForm">
+        <label>Email<input id="email" type="email" required placeholder="you@example.com"></label>
+        <label>Пароль<input id="password" type="password" minlength="6" required placeholder="••••••••"></label>
+        <label id="nameField" class="hidden">Имя<input id="displayName" placeholder="Вадим или Соня"></label>
+        <button class="primary full" type="submit" id="authSubmit">Войти</button>
+      </form>
+      <p id="authHint" class="small muted">После регистрации проверь почту, если включено подтверждение email.</p>
+      <div id="demoHint" class="demo-box">
+        Для локального прототипа можно нажать «Демо-режим» без Supabase.
+        <button type="button" id="demoBtn" class="secondary full">Демо-режим</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="appView" class="app hidden">
+    <aside class="sidebar">
+      <div class="brand">week<span>.</span></div>
+      <nav>
+        <button class="nav-btn active" data-section="week">Неделя</button>
+        <button class="nav-btn" data-section="requests">Предложения <span id="requestBadge" class="badge hidden">0</span></button>
+        <button class="nav-btn" data-section="templates">Частые задачи</button>
+        <button class="nav-btn" data-section="stats">Статистика</button>
+        <button class="nav-btn" data-section="settings">Настройки</button>
+      </nav>
+      <div class="profile-box">
+        <div class="avatar" id="avatar">?</div>
+        <div><strong id="profileName">Пользователь</strong><div class="small muted" id="profileEmail"></div></div>
+      </div>
+      <button id="logoutBtn" class="secondary full">Выйти</button>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <h1 id="sectionTitle">Неделя</h1>
+          <p id="weekLabel" class="muted"></p>
+        </div>
+        <div class="top-actions">
+          <button id="todayBtn" class="secondary">Сегодня</button>
+          <button id="addTaskBtn" class="primary">+ Добавить задачу</button>
+        </div>
+      </header>
+
+      <section id="weekSection" class="section">
+        <div class="person-tabs tabs">
+          <button class="tab active" data-person="shared">Общие</button>
+          <button class="tab" data-person="me">Мои</button>
+        </div>
+        <div class="week-controls">
+          <button id="prevWeek" class="icon-btn">←</button>
+          <button id="nextWeek" class="icon-btn">→</button>
+          <div class="load-legend">
+            <span><i class="dot low"></i> свободно</span>
+            <span><i class="dot mid"></i> средне</span>
+            <span><i class="dot high"></i> загружено</span>
+          </div>
+        </div>
+        <div id="weekGrid" class="week-grid"></div>
+      </section>
+
+      <section id="requestsSection" class="section hidden">
+        <div class="panel">
+          <div class="panel-head"><h2>Предложения задач</h2><span class="muted small">Принять или отклонить</span></div>
+          <div id="requestsList"></div>
+        </div>
+      </section>
+
+      <section id="templatesSection" class="section hidden">
+        <div class="panel">
+          <div class="panel-head">
+            <h2>Частые задачи</h2>
+            <button id="addTemplateBtn" class="primary">+ Шаблон</button>
+          </div>
+          <div id="templatesList" class="template-grid"></div>
+        </div>
+      </section>
+
+      <section id="statsSection" class="section hidden">
+        <div id="statsCards" class="stats-grid"></div>
+        <div class="panel"><h2>Нагрузка по дням</h2><div id="statsBars" class="stats-bars"></div></div>
+        <div class="panel"><h2>По категориям</h2><div id="categoryStats"></div></div>
+      </section>
+
+      <section id="settingsSection" class="section hidden">
+        <div class="panel settings-panel">
+          <h2>Настройки</h2>
+          <label>Имя<input id="settingsName"></label>
+          <label>Стандартная длительность (мин)<input id="defaultDuration" type="number" min="5" step="5" value="60"></label>
+          <button id="saveSettings" class="primary">Сохранить</button>
+          <hr>
+          <h3>Данные</h3>
+          <div class="settings-actions">
+            <button id="exportBtn" class="secondary">Экспорт JSON</button>
+            <label class="file-btn secondary">Импорт JSON<input id="importFile" type="file" accept=".json" hidden></label>
+          </div>
+          <p class="small muted">Экспорт — дополнительная резервная копия. Основные данные хранятся в Supabase.</p>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="taskModal" class="modal hidden">
+    <div class="modal-card">
+      <div class="modal-head"><h2 id="taskModalTitle">Новая задача</h2><button class="close" data-close="taskModal">×</button></div>
+      <form id="taskForm">
+        <input type="hidden" id="taskId">
+        <label>Название<input id="taskTitle" required placeholder="Например: сделать домашку"></label>
+        <label>Описание<textarea id="taskDescription" rows="3"></textarea></label>
+        <div class="form-grid">
+          <label>Дата<input id="taskDate" type="date" required></label>
+          <label>Время<input id="taskTime" type="time"></label>
+          <label>Длительность, мин<input id="taskDuration" type="number" min="5" step="5" value="60"></label>
+          <label>Дедлайн<input id="taskDeadline" type="datetime-local"></label>
+        </div>
+        <div class="form-grid">
+          <label>Категория<select id="taskCategory"><option>Школа</option><option>Репетитор</option><option>ОШ</option><option>Спорт</option><option>Личное</option><option>Другое</option></select></label>
+          <label>Приоритет<select id="taskPriority"><option value="mandatory">Обязательная</option><option value="desirable">Желательная</option><option value="optional">Необязательная</option></select></label>
+        </div>
+        <div class="check-row">
+          <label><input id="taskFixed" type="checkbox"> Фиксированное время</label>
+          <label><input id="taskRecurring" type="checkbox"> Повторять</label>
+        </div>
+        <div id="recurrenceBox" class="hidden">
+          <label>Повторение<select id="taskRecurrence"><option value="daily">Каждый день</option><option value="weekly">Каждую неделю</option><option value="weekdays">Пн–Пт</option></select></label>
+        </div>
+        <div class="destination-box">
+          <strong>Кому</strong>
+          <div class="radio-row">
+            <label><input type="radio" name="destination" value="private" checked> Мне</label>
+            <label><input type="radio" name="destination" value="shared"> Общая</label>
+            <label><input type="radio" name="destination" value="proposal"> Предложить другому</label>
+          </div>
+          <p id="proposalHint" class="small muted hidden">После создания задача попадёт другому пользователю на рассмотрение.</p>
+        </div>
+        <div class="modal-actions"><button type="button" class="secondary" data-close="taskModal">Отмена</button><button class="primary" type="submit">Сохранить</button></div>
+      </form>
+    </div>
+  </div>
+
+  <div id="templateModal" class="modal hidden">
+    <div class="modal-card small-card">
+      <div class="modal-head"><h2>Шаблон задачи</h2><button class="close" data-close="templateModal">×</button></div>
+      <form id="templateForm">
+        <label>Название<input id="templateTitle" required></label>
+        <label>Категория<select id="templateCategory"><option>Школа</option><option>Репетитор</option><option>ОШ</option><option>Спорт</option><option>Личное</option><option>Другое</option></select></label>
+        <label>Длительность, мин<input id="templateDuration" type="number" min="5" step="5" value="60"></label>
+        <label>Приоритет<select id="templatePriority"><option value="mandatory">Обязательная</option><option value="desirable">Желательная</option><option value="optional">Необязательная</option></select></label>
+        <div class="modal-actions"><button type="button" class="secondary" data-close="templateModal">Отмена</button><button class="primary">Сохранить</button></div>
+      </form>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
