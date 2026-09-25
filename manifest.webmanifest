@@ -7,5 +7,11 @@
   "theme_color":"#111318",
   "lang":"ru",
   "description":"Минималистичный планировщик недели для двоих",
-  "icons":[]
+  "icons": [
+  {
+    "src": "week.png",
+    "sizes": "512x512",
+    "type": "image/png"
+  }
+]
 }
