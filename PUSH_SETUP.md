@@ -1,115 +1,69 @@
-# week. — настоящие push-уведомления
+# Настоящие push-уведомления для week.
 
-Ниже настройка с нуля. Важно: **секретные ключи не кладём в `config.js` и GitHub**.
+В проект добавлена схема Web Push: браузер сохраняет push-подписку в Supabase, а Edge Function раз в минуту проверяет задачи и отправляет напоминания.
 
-## Шаг 1. SQL
+## 1. SQL
 
-1. Открой Supabase Dashboard и свой проект.
-2. Слева: **SQL Editor**.
-3. Нажми **New query**.
-4. Открой файл `push_setup.sql` из этой папки.
-5. Скопируй всё содержимое в SQL Editor.
-6. Нажми **Run**.
+В Supabase → SQL Editor выполни:
 
-## Шаг 2. VAPID-ключи
+`push_setup.sql`
 
-В терминале в папке проекта:
+## 2. VAPID-ключи
+
+В терминале выполни:
 
 ```powershell
-npm.cmd install web-push
 npx.cmd web-push generate-vapid-keys
 ```
 
-Сохрани `Public Key` и `Private Key`.
+Получишь `publicKey` и `privateKey`.
 
-В свой существующий `config.js` добавь только публичный ключ:
+- `publicKey` вставь в `config.js`:
+  `window.VAPID_PUBLIC_KEY = "..."`
+- `privateKey` **не добавляй в GitHub**.
 
-```js
-window.VAPID_PUBLIC_KEY = "ТВОЙ_PUBLIC_KEY";
-```
+## 3. Секреты Supabase
 
-Не вставляй Private Key в `config.js`.
+В Supabase → Edge Functions → Secrets добавь:
 
-## Шаг 3. Установить Supabase CLI
+- `VAPID_PUBLIC_KEY` = publicKey
+- `VAPID_PRIVATE_KEY` = privateKey
+- `VAPID_SUBJECT` = `mailto:твой-email@example.com`
 
-Если CLI ещё нет:
+`SUPABASE_URL` и `SUPABASE_SERVICE_ROLE_KEY` Edge Function использует из окружения проекта.
 
-```powershell
-npm.cmd install -g supabase
-```
+## 4. Секреты Edge Function
 
-Проверь:
+В Supabase → Edge Functions → Secrets добавь:
 
-```powershell
-supabase --version
-```
+- `VAPID_PUBLIC_KEY` = publicKey
+- `VAPID_PRIVATE_KEY` = privateKey
+- `VAPID_SUBJECT` = `mailto:твой-email@example.com`
+- `CRON_SECRET` = придумай длинную случайную строку
 
-## Шаг 4. Создать Edge Function
+`SUPABASE_URL` и `SUPABASE_SERVICE_ROLE_KEY` Edge Function использует из окружения проекта.
 
-В папке проекта функция уже находится здесь:
+## 5. Edge Function
 
-`supabase/functions/send-task-reminders/index.ts`
-
-Авторизация и привязка проекта:
+Нужен Supabase CLI. Из папки проекта:
 
 ```powershell
 supabase login
 supabase link --project-ref slxnlvvdwluhszwvwgmo
-```
-
-## Шаг 5. Секреты
-
-В Supabase Dashboard открой:
-
-**Edge Functions → Secrets**
-
-Добавь:
-
-- `VAPID_PUBLIC_KEY` = Public Key
-- `VAPID_PRIVATE_KEY` = Private Key
-- `VAPID_SUBJECT` = `mailto:ТВОЙ_EMAIL`
-- `CRON_SECRET` = длинная случайная строка
-
-Не публикуй `VAPID_PRIVATE_KEY` и `CRON_SECRET`.
-
-## Шаг 6. Deploy
-
-Из корня проекта:
-
-```powershell
 supabase functions deploy send-task-reminders
 ```
 
-## Шаг 7. Cron
+## 6. Запуск каждую минуту
 
-В Supabase Dashboard открой **Integrations / Cron** (название пункта может отличаться по версии интерфейса).
+В Supabase → Cron создай Job с расписанием `* * * * *` и HTTP-запросом:
 
-Создай Job:
-
-- Schedule: `* * * * *`
+- URL: `https://slxnlvvdwluhszwvwgmo.supabase.co/functions/v1/send-task-reminders`
 - Method: `POST`
-- URL:
-  `https://ТВОЙ_PROJECT_REF.supabase.co/functions/v1/send-task-reminders`
-- Header:
-  `x-cron-secret: ТВОЙ_CRON_SECRET`
+- Header: `x-cron-secret: <тот же CRON_SECRET>`
 - Body: `{}`
 
-## Шаг 8. Настройка в приложении
+Supabase Cron умеет вызывать Edge Functions по расписанию; это позволяет проверять задачи примерно раз в минуту.
 
-1. Открой опубликованный `week.` по HTTPS.
-2. Войди в аккаунт.
-3. Открой **Настройки**.
-4. Включи уведомления.
-5. Разреши уведомления браузеру.
-6. Выбери 5, 10, 15 или 30 минут.
+После этого пользователь включает «Уведомления» в week., разрешает push — и сервер сможет присылать напоминания за 5/10/15/30 минут до задачи.
 
-После этого сервер каждую минуту проверяет задачи и отправляет push-уведомление в выбранный момент.
-
-## Что уже есть в коде
-
-- PWA service worker принимает push.
-- Подписка устройства сохраняется в `push_subscriptions`.
-- Серверная функция учитывает часовой пояс устройства.
-- Напоминание отправляется один раз.
-- Удалённые/недействительные push-подписки очищаются автоматически.
-- Для обычных браузеров остаются локальные уведомления как запасной вариант.
+Важно: не добавляй `SUPABASE_SERVICE_ROLE_KEY`, `VAPID_PRIVATE_KEY` или `CRON_SECRET` в `config.js` и GitHub.

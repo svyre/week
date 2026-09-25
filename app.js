@@ -50,23 +50,34 @@
 
   async function registerPushNotifications(){
     if(state.demo){toast("Push-уведомления доступны только в аккаунте");return false}
-    if(!("serviceWorker" in navigator) || !("PushManager" in window)){toast("Этот браузер не поддерживает push-уведомления");return false}
-    if(!window.VAPID_PUBLIC_KEY){toast("Не настроен VAPID_PUBLIC_KEY");return false}
-    const permission=await Notification.requestPermission();
-    if(permission!=="granted"){toast("Разрешение на уведомления не выдано");return false}
-    const reg=await navigator.serviceWorker.ready;
-    let sub=await reg.pushManager.getSubscription();
-    if(!sub) sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:urlBase64ToUint8Array(window.VAPID_PUBLIC_KEY)});
-    const json=sub.toJSON();
-    const cfg=notificationSettings();
-    const {error}=await sb.from("push_subscriptions").upsert({
-      user_id:state.user.id, endpoint:json.endpoint, p256dh:json.keys?.p256dh, auth:json.keys?.auth,
-      lead_minutes:cfg.lead, timezone:Intl.DateTimeFormat().resolvedOptions().timeZone, enabled:true, updated_at:new Date().toISOString()
-    },{onConflict:"user_id,endpoint"});
-    if(error){toast(error.message);return false}
-    $("notificationsEnabled").checked=true;saveNotificationSettings();
-    localStorage.setItem("week-push-active","1");
-    toast("Push-уведомления включены");return true;
+    try{
+      if(!("serviceWorker" in navigator))throw new Error("Service Worker недоступен");
+      if(!("PushManager" in window))throw new Error("Push API недоступен в этом браузере");
+      if(!("Notification" in window))throw new Error("Notification API недоступен");
+      if(!window.VAPID_PUBLIC_KEY || window.VAPID_PUBLIC_KEY.includes("YOUR_"))throw new Error("Не настроен публичный VAPID-ключ");
+      const permission=Notification.permission==="granted"?"granted":await Notification.requestPermission();
+      if(permission!=="granted")throw new Error(`Разрешение на уведомления: ${permission}`);
+      const reg=await navigator.serviceWorker.ready;
+      let sub=await reg.pushManager.getSubscription();
+      if(!sub){
+        sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:urlBase64ToUint8Array(window.VAPID_PUBLIC_KEY)});
+      }
+      const json=sub.toJSON();
+      if(!json.endpoint || !json.keys?.p256dh || !json.keys?.auth)throw new Error("Браузер не вернул данные push-подписки");
+      const cfg=notificationSettings();
+      const {error}=await sb.from("push_subscriptions").upsert({
+        user_id:state.user.id, endpoint:json.endpoint, p256dh:json.keys.p256dh, auth:json.keys.auth,
+        lead_minutes:cfg.lead, timezone:Intl.DateTimeFormat().resolvedOptions().timeZone, enabled:true, updated_at:new Date().toISOString()
+      },{onConflict:"user_id,endpoint"});
+      if(error)throw new Error(`Supabase: ${error.message}`);
+      $("notificationsEnabled").checked=true;saveNotificationSettings();
+      localStorage.setItem("week-push-active","1");
+      toast("Push-уведомления включены");return true;
+    }catch(err){
+      console.error("Push registration failed",err);
+      toast(`Не удалось включить уведомления: ${err.message||err}`);
+      return false;
+    }
   }
 
   async function syncPushSubscription(){
@@ -145,7 +156,15 @@
   }
   function saveDemo(){localStorage.setItem("week-demo",JSON.stringify(demoData))}
   function showAuth(){$("authView").classList.remove("hidden");$("appView").classList.add("hidden")}
-  function showApp(){$("authView").classList.add("hidden");$("appView").classList.remove("hidden");renderAll()}
+  function showApp(){$("authView").classList.add("hidden");$("appView").classList.remove("hidden");renderAll();updateNotificationStatus()}
+
+  async function updateNotificationStatus(){
+    const el=$("notificationStatus");if(!el)return;
+    if(state.demo){el.textContent="Демо-режим";return}
+    if(!window.Notification){el.textContent="Уведомления не поддерживаются";return}
+    if(Notification.permission!=="granted"){el.textContent="Разрешение не выдано";return}
+    try{const reg=await navigator.serviceWorker.ready;const sub=await reg.pushManager.getSubscription();el.textContent=sub?"Уведомления подключены":"Разрешение выдано, подписка не создана";}catch{el.textContent="Не удалось проверить подписку"}
+  }
 
   async function enter(user){
     state.user=user;
@@ -192,9 +211,9 @@
     $("saveSettings").onclick=saveSettings;
     $("exportBtn").onclick=exportData;
     $("importFile").onchange=importData;
-    $("notificationsEnabled").onchange=async e=>{if(e.target.checked){await enableNotifications()}else{saveNotificationSettings();scheduleNotifications();await disablePushNotifications()}};
+    $("notificationsEnabled").onchange=async e=>{if(e.target.checked){await enableNotifications();updateNotificationStatus()}else{saveNotificationSettings();scheduleNotifications();await disablePushNotifications();updateNotificationStatus()}};
     $("notificationLead").onchange=async()=>{saveNotificationSettings();scheduleNotifications();await syncPushSubscription()};
-    $("enableNotifications").onclick=enableNotifications;
+    $("enableNotifications").onclick=async()=>{await enableNotifications();updateNotificationStatus()};
     if("Notification" in window && Notification.permission==="granted"){$("notificationsEnabled").checked=notificationSettings().enabled;}
   }
 
