@@ -42,6 +42,48 @@ Deno.serve(async (req) => {
 
   let sent=0, skipped=0, removed=0;
 
+  // Send event-driven notifications (proposal created/accepted/rejected, shared task done).
+  const {data:events,error:eventError}=await admin
+    .from("notification_events")
+    .select("id,recipient_id,type,title,body,data,created_at")
+    .order("created_at",{ascending:false})
+    .limit(100);
+  if(!eventError){
+    for(const event of events || []){
+      const {data:eventSubs}=await admin
+        .from("push_subscriptions")
+        .select("id,endpoint,p256dh,auth")
+        .eq("enabled",true)
+        .eq("user_id",event.recipient_id);
+      for(const sub of eventSubs || []){
+        const {data:already}=await admin
+          .from("push_notification_event_log")
+          .select("id")
+          .eq("event_id",event.id)
+          .eq("endpoint",sub.endpoint)
+          .maybeSingle();
+        if(already) continue;
+        const payload=JSON.stringify({
+          title:event.title || "week.",
+          body:event.body || "Новое событие",
+          tag:`week-event-${event.id}`,
+          url:"./"
+        });
+        try{
+          await webpush.sendNotification({endpoint:sub.endpoint,keys:{p256dh:sub.p256dh,auth:sub.auth}},payload,{TTL:300});
+          await admin.from("push_notification_event_log").insert({event_id:event.id,endpoint:sub.endpoint});
+          sent++;
+        }catch(error){
+          const status=(error as {statusCode?:number})?.statusCode;
+          if(status===404 || status===410){
+            await admin.from("push_subscriptions").delete().eq("id",sub.id);
+            removed++;
+          }else skipped++;
+        }
+      }
+    }
+  }
+
   for(const sub of subs || []){
     const now=localParts(sub.timezone || "UTC");
     const fromMinute=Math.max(0,now.minute);

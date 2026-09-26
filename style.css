@@ -155,3 +155,24 @@ html[data-theme="dark"] .toast{background:#f5f7fa;color:#101216;box-shadow:0 8px
   .day-track{border-radius:15px}.empty-day{min-height:calc(100svh - 330px)}
   .week-controls{gap:12px}
 }
+
+
+/* week. — smooth interactions */
+html{scroll-behavior:smooth}
+body,button,input,textarea,select,.panel,.task,.task-chip,.day-col,.request-card,.template,.stat,.nav-btn,.tab,.primary,.secondary,.icon-btn,.modal-card,.toast{transition:background-color .22s ease,color .22s ease,border-color .22s ease,box-shadow .22s ease,opacity .22s ease,transform .22s ease}
+button,.nav-btn,.tab,.task,.task-chip,.request-card,.template{will-change:transform}
+button:active{transform:scale(.97)}
+.task:hover,.task-chip:hover,.request-card:hover,.template:hover,.stat:hover{transform:translateY(-2px)}
+.modal{animation:week-fade-in .2s ease both}
+.modal-card{animation:week-modal-in .26s cubic-bezier(.22,1,.36,1) both}
+.toast{animation:none}
+@keyframes week-fade-in{from{opacity:0}to{opacity:1}}
+@keyframes week-modal-in{from{opacity:0;transform:translateY(14px) scale(.985)}to{opacity:1;transform:none}}
+@media(max-width:700px){.modal-card{animation:week-sheet-in .28s cubic-bezier(.22,1,.36,1) both}}
+@keyframes week-sheet-in{from{opacity:0;transform:translateY(28px)}to{opacity:1;transform:none}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
+
+.section:not(.hidden){animation:week-section-in .22s ease both}
+.day-col{animation:week-day-in .24s cubic-bezier(.22,1,.36,1) both}
+@keyframes week-section-in{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
+@keyframes week-day-in{from{opacity:0;transform:translateX(8px)}to{opacity:1;transform:none}}

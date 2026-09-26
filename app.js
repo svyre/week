@@ -7,7 +7,7 @@
 
   let state = {
     user:null, profile:null, section:"week", person:"me",
-    weekStart: startOfWeek(new Date()), currentDate: new Date(), tasks:[], requests:[], templates:[], timeLogs:[], activeTimer:null,
+    weekStart: startOfWeek(new Date()), currentDate: new Date(), tasks:[], requests:[], sentRequests:[], templates:[], timeLogs:[], activeTimer:null,
     demo: !hasSupabase, authMode:"login"
   };
 
@@ -287,25 +287,43 @@
     state.profile=profile;
     await reloadCloud();
     showApp();
+    setupRealtimeNotifications();
     await syncPushSubscription();
   }
   async function reloadCloud(){
     if(state.demo){loadDemo();return}
     const cutoff=new Date();cutoff.setDate(cutoff.getDate()-60);
-    const [{data:tasks,error:tasksErr},{data:requests,error:reqErr},{data:templates,error:tplErr},{data:logs,error:logsErr}]=await Promise.all([
+    const [{data:tasks,error:tasksErr},{data:requests,error:reqErr},{data:sentRequests,error:sentReqErr},{data:templates,error:tplErr},{data:logs,error:logsErr}]=await Promise.all([
       sb.from("tasks").select("*").order("date").order("start_time"),
       sb.from("task_requests").select("*").eq("to_user_id",state.user.id).eq("status","pending").order("created_at",{ascending:false}),
+      sb.from("task_requests").select("*").eq("from_user_id",state.user.id).order("created_at",{ascending:false}).limit(50),
       sb.from("task_templates").select("*").eq("user_id",state.user.id).order("created_at",{ascending:false}),
       sb.from("time_logs").select("*").eq("user_id",state.user.id).gte("started_at",cutoff.toISOString()).order("started_at",{ascending:false})
     ]);
-    if(tasksErr||reqErr||tplErr||logsErr){
-      console.error("reloadCloud error",{tasksErr,reqErr,tplErr,logsErr});
-      toast(`Ошибка загрузки: ${(tasksErr||reqErr||tplErr||logsErr).message}`);
+    if(tasksErr||reqErr||sentReqErr||tplErr||logsErr){
+      console.error("reloadCloud error",{tasksErr,reqErr,sentReqErr,tplErr,logsErr});
+      toast(`Ошибка загрузки: ${(tasksErr||reqErr||sentReqErr||tplErr||logsErr).message}`);
     }
-    state.tasks=tasks||[];state.requests=requests||[];state.templates=templates||[];state.timeLogs=logs||[];
+    state.tasks=tasks||[];state.requests=requests||[];state.sentRequests=sentRequests||[];state.templates=templates||[];state.timeLogs=logs||[];
     restoreActiveTimer();
     scheduleNotifications();
     $("requestBadge").textContent=state.requests.length;$("requestBadge").classList.toggle("hidden",!state.requests.length);
+  }
+
+  function setupRealtimeNotifications(){
+    if(state.demo||!sb||!state.user)return;
+    if(state.__notificationChannel)sb.removeChannel(state.__notificationChannel);
+    const channel=sb.channel(`week-notifications-${state.user.id}`)
+      .on("postgres_changes",{event:"INSERT",schema:"public",table:"notification_events",filter:`recipient_id=eq.${state.user.id}`},async payload=>{
+        const n=payload.new||{};
+        if(n.type==="task_reminder")return;
+        const body=n.body||"Новое событие";
+        toast(body);
+        if("Notification" in window && Notification.permission==="granted" && notificationSettings().enabled && document.visibilityState!=="visible")new Notification(n.title||"week.",{body,tag:`week-event-${n.id}`});
+        await reloadCloud();
+        renderAll();
+      }).subscribe();
+    state.__notificationChannel=channel;
   }
 
   function bindStatic(){
@@ -636,7 +654,7 @@
     const file=e.target.files[0];if(!file)return;const reader=new FileReader();reader.onload=()=>{try{const data=JSON.parse(reader.result);if(Array.isArray(data.tasks)){demoData.tasks.push(...data.tasks);saveDemo();loadDemo();renderAll();toast("Импортировано")}else toast("Неверный файл")}catch{toast("Не удалось прочитать JSON")}};reader.readAsText(file);
   }
 
-  setInterval(async()=>{if(!state.demo && state.user){const before=state.requests.length;await reloadCloud();if(state.requests.length>before && "Notification" in window && Notification.permission==="granted" && notificationSettings().enabled)new Notification("week.",{body:"Новое предложение задачи",tag:"week-request"});renderRequests();}},60000);
+  setInterval(async()=>{if(!state.demo && state.user){const beforeIncoming=state.requests.length;const beforeStatuses=new Map((state.sentRequests||[]).map(r=>[r.id,r.status]));await reloadCloud();if(state.requests.length>beforeIncoming && "Notification" in window && Notification.permission==="granted" && notificationSettings().enabled)new Notification("week.",{body:"Новое предложение задачи",tag:"week-request"});for(const r of state.sentRequests||[]){const old=beforeStatuses.get(r.id);if(old&&old!==r.status){const name=r.status==="accepted"?"Предложение принято":r.status==="rejected"?"Предложение отклонено":"Предложение обновлено";if("Notification" in window && Notification.permission==="granted" && notificationSettings().enabled)new Notification("week.",{body:name,tag:`week-request-${r.id}`});}}renderRequests();}},60000);
   applyTheme(localStorage.getItem("week-theme")||APP_CFG.theme||"system");
   if(window.matchMedia){window.matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change",()=>{if((localStorage.getItem("week-theme")||APP_CFG.theme)==="system")applyTheme("system")})}
   boot();
