@@ -314,6 +314,8 @@ end $$;
 -- Friends / multi-user support
 -- ============================================================
 alter table public.profiles add column if not exists username text;
+alter table public.profiles add column if not exists onboarding_completed boolean not null default false;
+alter table public.profiles add column if not exists studies_at_school boolean;
 
 -- Give existing accounts a stable username before adding uniqueness.
 update public.profiles
@@ -334,6 +336,9 @@ create table if not exists public.friend_requests (
 
 create index if not exists friend_requests_to_idx on public.friend_requests(to_user_id,status,created_at desc);
 create index if not exists friend_requests_from_idx on public.friend_requests(from_user_id,status,created_at desc);
+create unique index if not exists friend_requests_one_pending_per_pair_idx
+on public.friend_requests (least(from_user_id,to_user_id),greatest(from_user_id,to_user_id))
+where status='pending';
 
 create table if not exists public.friendships (
   user_a uuid not null references public.profiles(id) on delete cascade,
@@ -342,6 +347,22 @@ create table if not exists public.friendships (
   primary key (user_a,user_b),
   check (user_a < user_b)
 );
+
+create table if not exists public.schedule_items (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  kind text not null check (kind in ('school','extra')),
+  day_of_week integer not null check (day_of_week between 0 and 6),
+  title text not null,
+  start_time time not null,
+  end_time time not null,
+  created_at timestamptz not null default now(),
+  check (end_time > start_time)
+);
+create index if not exists schedule_items_user_day_idx on public.schedule_items(user_id,day_of_week,start_time);
+alter table public.schedule_items enable row level security;
+drop policy if exists "schedule_items_all_own" on public.schedule_items;
+create policy "schedule_items_all_own" on public.schedule_items for all using (user_id=auth.uid()) with check (user_id=auth.uid());
 
 create table if not exists public.task_members (
   task_id uuid not null references public.tasks(id) on delete cascade,

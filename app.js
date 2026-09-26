@@ -8,19 +8,19 @@
   let state = {
     user:null, profile:null, section:"week", person:"me",
     weekStart: startOfWeek(new Date()), currentDate: new Date(), tasks:[], requests:[], sentRequests:[], templates:[], timeLogs:[], activeTimer:null,
-    friends:[], friendRequests:[], sentFriendRequests:[],
-    demo: !hasSupabase, authMode:"login"
+    friends:[], friendRequests:[], sentFriendRequests:[], schedule:[],
+    demo: !hasSupabase, authMode:"login", onboardingStep:1, sendingFriendIds:new Set()
   };
 
   const demoData = {
     profiles:[
-      {id:"demo-vadim",display_name:"Вадим",username:"vadim",email:"vadim@demo"},
-      {id:"demo-sonya",display_name:"Соня",username:"sonya",email:"sonya@demo"}
+      {id:"demo-vadim",display_name:"Вадим",username:"vadim",email:"vadim@demo",onboarding_completed:false,studies_at_school:null},
+      {id:"demo-sonya",display_name:"Соня",username:"sonya",email:"sonya@demo",onboarding_completed:false,studies_at_school:null}
     ],
     tasks:[], requests:[], templates:[
       {id:"t1",title:"Сделать домашку",category:"Школа",duration:60,priority:"mandatory"},
       {id:"t2",title:"Подготовка к репетитору",category:"Репетитор",duration:45,priority:"desirable"}
-    ], timeLogs:[], friendships:[{user_a:"demo-vadim",user_b:"demo-sonya"}], friendRequests:[]
+    ], timeLogs:[], schedules:[], friendships:[{user_a:"demo-vadim",user_b:"demo-sonya"}], friendRequests:[]
   };
 
   function uid(){return crypto.randomUUID ? crypto.randomUUID() : Date.now()+"-"+Math.random();}
@@ -265,6 +265,7 @@
     state.friends=demoData.profiles.filter(p=>friendIds.includes(p.id));
     state.friendRequests=(demoData.friendRequests||[]).filter(r=>r.to_user_id===currentUserId()&&r.status==="pending");
     state.sentFriendRequests=(demoData.friendRequests||[]).filter(r=>r.from_user_id===currentUserId()&&r.status==="pending");
+    state.schedule=(demoData.schedules||[]).filter(r=>r.user_id===currentUserId());
     state.__profiles=demoData.profiles;
     restoreActiveTimer();
     scheduleNotifications();
@@ -294,13 +295,14 @@
     state.profile=profile;
     await reloadCloud();
     showApp();
+    maybeShowOnboarding();
     setupRealtimeNotifications();
     await syncPushSubscription();
   }
   async function reloadCloud(){
     if(state.demo){loadDemo();return}
     const cutoff=new Date();cutoff.setDate(cutoff.getDate()-60);
-    const [{data:tasks,error:tasksErr},{data:requests,error:reqErr},{data:sentRequests,error:sentReqErr},{data:templates,error:tplErr},{data:logs,error:logsErr},{data:friendRows,error:friendsErr},{data:friendRequests,error:friendReqErr},{data:sentFriendRequests,error:sentFriendReqErr}]=await Promise.all([
+    const [{data:tasks,error:tasksErr},{data:requests,error:reqErr},{data:sentRequests,error:sentReqErr},{data:templates,error:tplErr},{data:logs,error:logsErr},{data:friendRows,error:friendsErr},{data:friendRequests,error:friendReqErr},{data:sentFriendRequests,error:sentFriendReqErr},{data:schedule,error:scheduleErr}]=await Promise.all([
       sb.from("tasks").select("*").order("date").order("start_time"),
       sb.from("task_requests").select("*").eq("to_user_id",state.user.id).eq("status","pending").order("created_at",{ascending:false}),
       sb.from("task_requests").select("*").eq("from_user_id",state.user.id).order("created_at",{ascending:false}).limit(50),
@@ -308,18 +310,19 @@
       sb.from("time_logs").select("*").eq("user_id",state.user.id).gte("started_at",cutoff.toISOString()).order("started_at",{ascending:false}),
       sb.from("friendships").select("user_a,user_b").or(`user_a.eq.${state.user.id},user_b.eq.${state.user.id}`),
       sb.from("friend_requests").select("id,from_user_id,to_user_id,status,created_at").eq("to_user_id",state.user.id).eq("status","pending").order("created_at",{ascending:false}),
-      sb.from("friend_requests").select("id,from_user_id,to_user_id,status,created_at").eq("from_user_id",state.user.id).eq("status","pending").order("created_at",{ascending:false})
+      sb.from("friend_requests").select("id,from_user_id,to_user_id,status,created_at").eq("from_user_id",state.user.id).eq("status","pending").order("created_at",{ascending:false}),
+      sb.from("schedule_items").select("*").eq("user_id",state.user.id).order("day_of_week").order("start_time")
     ]);
     const friendIds=(friendRows||[]).map(r=>r.user_a===state.user.id?r.user_b:r.user_a);
     const requesterIds=(friendRequests||[]).map(r=>r.from_user_id);
     const profileIds=[...new Set([...friendIds,...requesterIds])];
     const {data:friendProfiles}=profileIds.length?await sb.from("profiles").select("id,display_name,username").in("id",profileIds):{data:[]};
-    const allErr=tasksErr||reqErr||sentReqErr||tplErr||logsErr||friendsErr||friendReqErr||sentFriendReqErr;
+    const allErr=tasksErr||reqErr||sentReqErr||tplErr||logsErr||friendsErr||friendReqErr||sentFriendReqErr||scheduleErr;
     if(allErr){console.error("reloadCloud error",allErr);toast(`Ошибка загрузки: ${allErr.message}`)}
     state.tasks=tasks||[];state.requests=requests||[];state.sentRequests=sentRequests||[];state.templates=templates||[];state.timeLogs=logs||[];
     state.friends=(friendProfiles||[]).filter(p=>friendIds.includes(p.id));
     state.__profiles=friendProfiles||[];
-    state.friendRequests=friendRequests||[];state.sentFriendRequests=sentFriendRequests||[];
+    state.friendRequests=friendRequests||[];state.sentFriendRequests=sentFriendRequests||[];state.schedule=schedule||[];
     restoreActiveTimer();scheduleNotifications();
     $("requestBadge").textContent=state.requests.length;$("requestBadge").classList.toggle("hidden",!state.requests.length);
     if($("friendBadge")){ $("friendBadge").textContent=state.friendRequests.length;$("friendBadge").classList.toggle("hidden",!state.friendRequests.length); }
@@ -348,6 +351,12 @@
     $("logoutBtn").onclick=logout;
     qsa(".nav-btn").forEach(b=>b.onclick=()=>switchSection(b.dataset.section));
     $("friendSearchForm").onsubmit=searchFriend;
+    $("onboardingForm").onsubmit=finishOnboarding;
+    $("onboardingNext").onclick=onboardingNext;
+    $("onboardingBack").onclick=onboardingBack;
+    $("addSchoolItem").onclick=()=>addScheduleEditorRow("school");
+    $("addExtraItem").onclick=()=>addScheduleEditorRow("extra");
+    $("editScheduleBtn").onclick=()=>openOnboarding();
     $("prevWeek").onclick=()=>moveDay(-1);
     $("nextWeek").onclick=()=>moveDay(1);
     $("todayBtn").onclick=()=>goToday();
@@ -395,6 +404,99 @@
     if(s==="requests")renderRequests();if(s==="friends")renderFriends();if(s==="templates")renderTemplates();if(s==="stats")renderStats();if(s==="settings")renderSettings();
   }
 
+
+  const DAY_OPTIONS=[["1","Пн"],["2","Вт"],["3","Ср"],["4","Чт"],["5","Пт"],["6","Сб"],["0","Вс"]];
+  function maybeShowOnboarding(){if(state.profile&&!state.profile.onboarding_completed)openOnboarding();}
+  function openOnboarding(){
+    state.onboardingStep=1;
+    const school=state.profile?.studies_at_school===true?"yes":state.profile?.studies_at_school===false?"no":"";
+    const hasExtra=(state.schedule||[]).some(x=>x.kind==="extra");
+    qsa('input[name="school"]').forEach(x=>x.checked=x.value===school);
+    qsa('input[name="extras"]').forEach(x=>x.checked=x.value===(hasExtra?"yes":state.profile?.onboarding_completed?"no":""));
+    $("schoolScheduleList").innerHTML=""; $("extraScheduleList").innerHTML="";
+    (state.schedule||[]).filter(x=>x.kind==="school").forEach(x=>addScheduleEditorRow("school",x));
+    (state.schedule||[]).filter(x=>x.kind==="extra").forEach(x=>addScheduleEditorRow("extra",x));
+    updateScheduleEmpty("school");updateScheduleEmpty("extra");
+    $("onboardingModal").classList.remove("hidden");updateOnboardingUI();
+  }
+  function selectedRadio(name){return qs(`input[name="${name}"]:checked`)?.value||""}
+  function updateOnboardingUI(){
+    const step=state.onboardingStep;
+    qsa(".onboarding-step").forEach(x=>x.classList.toggle("hidden",Number(x.dataset.step)!==step));
+    qsa("#onboardingProgress span").forEach((x,i)=>x.classList.toggle("active",i<step));
+    $("onboardingBack").classList.toggle("hidden",step===1);
+    $("onboardingNext").classList.toggle("hidden",step===4);
+    $("onboardingFinish").classList.toggle("hidden",step!==4);
+    $("onboardingTitle").textContent=step===1?"Расскажем week. о твоём расписании":step===2?"Школьное расписание":step===3?"Дополнительные занятия":"Расписание дополнительных занятий";
+    if(step===2&&selectedRadio("school")==="yes"&&!document.querySelector("#schoolScheduleList .schedule-row"))addScheduleEditorRow("school");
+    if(step===4&&!document.querySelector("#extraScheduleList .schedule-row"))addScheduleEditorRow("extra");
+  }
+  function addScheduleEditorRow(type,item={}){
+    const list=$(type==="school"?"schoolScheduleList":"extraScheduleList");
+    const row=document.createElement("div");row.className="schedule-row";
+    const day=String(item.day_of_week??"1");
+    row.innerHTML=`<label>День<select data-field="day">${DAY_OPTIONS.map(([v,n])=>`<option value="${v}" ${v===day?"selected":""}>${n}</option>`).join("")}</select></label>
+      <label>${type==="school"?"Предмет":"Занятие"}<input data-field="title" required value="${esc(item.title||"")}" placeholder="${type==="school"?"Например, математика":"Например, репетитор"}"></label>
+      <label>Начало<input data-field="start" type="time" required value="${esc((item.start_time||"").slice(0,5))}"></label>
+      <label>Конец<input data-field="end" type="time" required value="${esc((item.end_time||"").slice(0,5))}"></label>
+      <button type="button" class="schedule-remove">×</button>`;
+    row.querySelector(".schedule-remove").onclick=()=>{row.remove();updateScheduleEmpty(type)};
+    list.appendChild(row);updateScheduleEmpty(type);
+  }
+  function updateScheduleEmpty(type){
+    const list=$(type==="school"?"schoolScheduleList":"extraScheduleList");
+    $(type==="school"?"schoolScheduleEmpty":"extraScheduleEmpty").classList.toggle("hidden",!!list.querySelector(".schedule-row"));
+  }
+  function collectSchedule(type){
+    const list=$(type==="school"?"schoolScheduleList":"extraScheduleList");
+    return [...list.querySelectorAll(".schedule-row")].map(row=>({
+      kind:type,day_of_week:Number(row.querySelector('[data-field="day"]').value),
+      title:row.querySelector('[data-field="title"]').value.trim(),
+      start_time:row.querySelector('[data-field="start"]').value,
+      end_time:row.querySelector('[data-field="end"]').value
+    })).filter(x=>x.title&&x.start_time&&x.end_time);
+  }
+  function onboardingNext(){
+    if(state.onboardingStep===1){
+      if(!selectedRadio("school"))return toast("Выбери, учишься ли ты в школе");
+      state.onboardingStep=selectedRadio("school")==="yes"?2:3;
+    }else if(state.onboardingStep===2)state.onboardingStep=3;
+    else if(state.onboardingStep===3){
+      if(!selectedRadio("extras"))return toast("Выбери, есть ли дополнительные занятия");
+      if(selectedRadio("extras")==="no")return finishOnboarding();
+      state.onboardingStep=4;
+    }
+    updateOnboardingUI();
+  }
+  function onboardingBack(){
+    if(state.onboardingStep===4)state.onboardingStep=3;
+    else if(state.onboardingStep===3)state.onboardingStep=selectedRadio("school")==="yes"?2:1;
+    else if(state.onboardingStep===2)state.onboardingStep=1;
+    updateOnboardingUI();
+  }
+  async function finishOnboarding(e){
+    e?.preventDefault();
+    const school=selectedRadio("school"),extras=selectedRadio("extras");
+    if(!school)return onboardingBack();
+    if(school==="yes"&&!collectSchedule("school").length){state.onboardingStep=2;updateOnboardingUI();return toast("Добавь хотя бы один школьный урок");}
+    if(!extras){state.onboardingStep=3;updateOnboardingUI();return toast("Выбери вариант про дополнительные занятия");}
+    if(extras==="yes"&&!collectSchedule("extra").length){state.onboardingStep=4;updateOnboardingUI();return toast("Добавь хотя бы одно дополнительное занятие");}
+    const items=[...collectSchedule("school"),...collectSchedule("extra")];
+    if(state.demo){
+      demoData.schedules=(demoData.schedules||[]).filter(x=>x.user_id!==currentUserId());
+      demoData.schedules.push(...items.map(x=>({...x,id:uid(),user_id:currentUserId()})));
+      const p=demoData.profiles.find(x=>x.id===currentUserId()); if(p){p.onboarding_completed=true;p.studies_at_school=school==="yes";state.profile=p;}
+      saveDemo();loadDemo();
+    }else{
+      const d=await sb.from("schedule_items").delete().eq("user_id",state.user.id); if(d.error)return toast(d.error.message);
+      if(items.length){const ins=await sb.from("schedule_items").insert(items.map(x=>({...x,user_id:state.user.id})));if(ins.error)return toast(ins.error.message);}
+      const up=await sb.from("profiles").update({onboarding_completed:true,studies_at_school:school==="yes"}).eq("id",state.user.id).select().single();
+      if(up.error)return toast(up.error.message);
+      state.profile=up.data;state.schedule=items.map(x=>({...x,user_id:state.user.id}));
+    }
+    $("onboardingModal").classList.add("hidden");renderAll();toast("Расписание сохранено");
+  }
+
   function renderAll(){
     $("profileName").textContent=state.profile?.display_name||"Пользователь";
     $("profileEmail").textContent=state.profile?.email||state.user?.email||"";
@@ -428,13 +530,17 @@
     const base=visibleTasks();
     const tasks=expandOccurrences(base,selectedDate(),1).filter(t=>t.date===ds);
     const timed=tasks.filter(t=>t.start_time);
+    const jsDay=selectedDate().getDay();
+    const daySchedule=(state.schedule||[]).filter(x=>Number(x.day_of_week)===jsDay);
     const total=tasks.reduce((a,t)=>a+minutes(t),0);
     const level=total>480?"high":total>300?"mid":"low";
     const untimed=tasks.filter(t=>!t.start_time);
     let trackTop=GRID_START_HOUR*60, trackBottom=GRID_END_HOUR*60;
-    if(timed.length){
-      const minStart=Math.min(...timed.map(t=>toMin(t.start_time)));
-      const maxEnd=Math.max(...timed.map(t=>toMin(t.start_time)+minutes(t)));
+    if(timed.length||daySchedule.length){
+      const starts=[...timed.map(t=>toMin(t.start_time)),...daySchedule.filter(x=>x.start_time).map(x=>toMin(x.start_time))];
+      const ends=[...timed.map(t=>toMin(t.start_time)+minutes(t)),...daySchedule.filter(x=>x.start_time&&x.end_time).map(x=>toMin(x.end_time))];
+      const minStart=Math.min(...starts);
+      const maxEnd=Math.max(...ends);
       trackTop=Math.max(GRID_START_HOUR*60,Math.floor(minStart/60)*60-60);
       trackBottom=Math.min(GRID_END_HOUR*60,Math.ceil(maxEnd/60)*60+60);
       if(trackBottom-trackTop<180)trackBottom=Math.min(GRID_END_HOUR*60,trackTop+180);
@@ -443,6 +549,11 @@
     const hourCount=Math.max(1,Math.round((trackBottom-trackTop)/60));
     const hourLines=[...Array(hourCount+1)].map((_,i)=>`<div class="hour-line" style="top:${i*PX_PER_HOUR}px" data-h="${String(Math.floor((trackTop+i*60)/60)).padStart(2,"0")}:00"></div>`).join("");
     const placed=layoutDayTasks(tasks);
+    const scheduleBlocks=daySchedule.filter(x=>x.start_time&&x.end_time).map(x=>{
+      const start=toMin(x.start_time),end=toMin(x.end_time);
+      const top=Math.max(0,(start-trackTop)/60*PX_PER_HOUR),height=Math.max(24,(end-start)/60*PX_PER_HOUR);
+      return `<div class="schedule-track-item" style="top:${top}px;height:${height}px">${esc(x.title)}<span>${String(x.start_time).slice(0,5)}–${String(x.end_time).slice(0,5)}</span></div>`;
+    }).join("");
     const blocks=placed.map(t=>{
       const top=Math.max(0,(t._start-trackTop)/60*PX_PER_HOUR);
       const height=Math.max(30,(t._end-t._start)/60*PX_PER_HOUR);
@@ -456,7 +567,7 @@
       <div class="day-head"><div><span class="day-name">${dayTitle(ds)}</span><div class="small muted">${isToday(ds)?"Текущий день":""}</div></div><span class="day-date">${fmtDate(ds)}</span></div>
       <div class="day-summary"><div><strong>${tasks.length}</strong><span> ${tasks.length===1?"задача":"задач"}</span></div><div class="load-line"><span class="${level}" style="width:${Math.min(100,total/600*100)}%"></span></div><span class="small muted">${Math.floor(total/60)} ч ${total%60} мин</span></div>
       ${untimed.length?`<div class="untimed-list">${untimed.map(taskChipHtml).join("")}</div>`:""}
-      ${empty?`<div class="empty-day"><div class="empty-icon">○</div><strong>День свободен</strong><span>Здесь пока нет задач</span><button class="secondary" onclick="window.openTaskForDate('${ds}')">+ Добавить задачу</button></div>`:`<div class="day-track" style="height:${trackHeight}px">${hourLines}${nowLine}${blocks}</div>`}
+      ${(empty&&!scheduleBlocks)?`<div class="empty-day"><div class="empty-icon">○</div><strong>День свободен</strong><span>Здесь пока нет задач</span><button class="secondary" onclick="window.openTaskForDate('${ds}')">+ Добавить задачу</button></div>`:`<div class="day-track" style="height:${trackHeight}px">${hourLines}${nowLine}${scheduleBlocks}${blocks}</div>`}
     </div>`;
     $("prevWeek").classList.toggle("muted-nav",false);
   }
@@ -645,14 +756,28 @@
     if(!data){$("friendSearchResult").innerHTML='<p class="muted small">Пользователь не найден.</p>';return}
     if(friendById(data.id)){$("friendSearchResult").innerHTML='<p class="muted small">Этот пользователь уже у тебя в друзьях.</p>';return}
     const already=state.sentFriendRequests.some(r=>r.to_user_id===data.id)||state.friendRequests.some(r=>r.from_user_id===data.id);
-    $("friendSearchResult").innerHTML=already?`<div class="friend-result"><div><strong>${esc(data.display_name)}</strong><div class="small muted">@${esc(data.username||"")}</div></div><span class="small muted">Заявка уже отправлена</span></div>`:`<div class="friend-result"><div><strong>${esc(data.display_name)}</strong><div class="small muted">@${esc(data.username||"")}</div></div><button class="primary" onclick="window.sendFriendRequest('${data.id}')">Добавить</button></div>`;
+    $("friendSearchResult").innerHTML=already?`<div class="friend-result"><div><strong>${esc(data.display_name)}</strong><div class="small muted">@${esc(data.username||"")}</div></div><span class="small muted">Заявка уже отправлена</span></div>`:`<div class="friend-result"><div><strong>${esc(data.display_name)}</strong><div class="small muted">@${esc(data.username||"")}</div></div><button class="primary" data-friend-id="${data.id}" onclick="window.sendFriendRequest('${data.id}')">Добавить</button></div>`;
   }
 
   window.sendFriendRequest=async id=>{
-    if(state.demo){window.demoAddFriend(id);return}
-    const {error}=await sb.from("friend_requests").insert({from_user_id:state.user.id,to_user_id:id,status:"pending"});
-    if(error){toast(error.message);return}
-    await reloadCloud();renderFriends();toast("Заявка отправлена");
+    if(!id||id===state.user?.id)return;
+    if(state.sendingFriendIds.has(id))return;
+    if(friendById(id)||state.sentFriendRequests.some(r=>r.to_user_id===id)||state.friendRequests.some(r=>r.from_user_id===id)){
+      toast("Заявка уже отправлена или вы уже друзья"); return;
+    }
+    state.sendingFriendIds.add(id);
+    const button=$("friendSearchResult")?.querySelector(`[data-friend-id="${id}"]`);
+    if(button){button.disabled=true;button.textContent="Отправляем…";}
+    try{
+      if(state.demo){window.demoAddFriend(id);return;}
+      const {error}=await sb.from("friend_requests").insert({from_user_id:state.user.id,to_user_id:id,status:"pending"});
+      if(error){
+        if(String(error.code)==="23505")toast("Заявка уже отправлена");
+        else toast(error.message);
+        await reloadCloud();renderFriends();return;
+      }
+      await reloadCloud();renderFriends();toast("Заявка отправлена");
+    }finally{state.sendingFriendIds.delete(id);}
   };
   window.demoAddFriend=id=>{
     if(!demoData.friendships)demoData.friendships=[];
@@ -729,7 +854,7 @@
     renderAll();toast("Настройки сохранены");
   }
   function exportData(){
-    const data={exported_at:new Date().toISOString(),profile:state.profile,tasks:state.tasks,requests:state.requests,templates:state.templates};
+    const data={exported_at:new Date().toISOString(),profile:state.profile,schedule:state.schedule,tasks:state.tasks,requests:state.requests,templates:state.templates};
     const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:"application/json"}));a.download="week-backup.json";a.click();URL.revokeObjectURL(a.href);
   }
   function importData(e){

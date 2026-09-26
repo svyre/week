@@ -137,7 +137,7 @@
             <button id="enableNotifications" class="secondary">Разрешить уведомления</button>
           </div>
           <label>Стандартная длительность (мин)<input id="defaultDuration" type="number" min="5" step="5" value="60"></label>
-          <button id="saveSettings" class="primary">Сохранить</button>
+          <button id="saveSettings" class="primary">Сохранить</button><button id="editScheduleBtn" class="secondary">Изменить расписание</button>
           <hr>
           <h3>Данные</h3>
           <div class="settings-actions">
@@ -148,6 +148,47 @@
         </div>
       </section>
     </main>
+  </div>
+
+
+  <div id="onboardingModal" class="modal hidden">
+    <div class="modal-card onboarding-card">
+      <div class="modal-head"><div><div class="eyebrow">Первичная настройка</div><h2 id="onboardingTitle">Расскажем week. о твоём расписании</h2></div></div>
+      <div id="onboardingProgress" class="onboarding-progress"><span class="active"></span><span></span><span></span><span></span></div>
+      <form id="onboardingForm">
+        <section class="onboarding-step" data-step="1">
+          <h3>Учишься ли ты в школе?</h3>
+          <p class="muted">week. будет учитывать школьные занятия при планировании дня.</p>
+          <div class="choice-grid">
+            <label class="choice-card"><input type="radio" name="school" value="yes"><strong>Да</strong><span>Я учусь в школе</span></label>
+            <label class="choice-card"><input type="radio" name="school" value="no"><strong>Нет</strong><span>Сейчас не учусь в школе</span></label>
+          </div>
+        </section>
+        <section class="onboarding-step hidden" data-step="2">
+          <div class="onboarding-head"><div><h3>Школьное расписание</h3><p class="muted">Добавь уроки по дням.</p></div><button type="button" class="secondary" id="addSchoolItem">+ Урок</button></div>
+          <div id="schoolScheduleList" class="schedule-editor"></div>
+          <p id="schoolScheduleEmpty" class="muted small hidden">Пока ничего нет.</p>
+        </section>
+        <section class="onboarding-step hidden" data-step="3">
+          <h3>Есть ли у тебя дополнительные занятия?</h3>
+          <p class="muted">Например: репетитор, ОШ, спорт, музыкальная школа, курсы и другие регулярные занятия.</p>
+          <div class="choice-grid">
+            <label class="choice-card"><input type="radio" name="extras" value="yes"><strong>Да</strong><span>Есть дополнительные занятия</span></label>
+            <label class="choice-card"><input type="radio" name="extras" value="no"><strong>Нет</strong><span>Дополнительных занятий нет</span></label>
+          </div>
+        </section>
+        <section class="onboarding-step hidden" data-step="4">
+          <div class="onboarding-head"><div><h3>Расписание дополнительных занятий</h3><p class="muted">Добавь всё регулярное, что нужно учитывать.</p></div><button type="button" class="secondary" id="addExtraItem">+ Занятие</button></div>
+          <div id="extraScheduleList" class="schedule-editor"></div>
+          <p id="extraScheduleEmpty" class="muted small hidden">Пока ничего нет.</p>
+        </section>
+        <div class="modal-actions onboarding-actions">
+          <button type="button" class="secondary" id="onboardingBack">Назад</button>
+          <button type="button" class="primary" id="onboardingNext">Далее</button>
+          <button type="submit" class="primary hidden" id="onboardingFinish">Готово</button>
+        </div>
+      </form>
+    </div>
   </div>
 
   <div id="taskModal" class="modal hidden">
