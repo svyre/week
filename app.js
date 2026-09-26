@@ -33,7 +33,7 @@
   function minutes(t){return Number(t.duration)||60}
   function toMin(t){const [h,m]=t.slice(0,5).split(":").map(Number);return h*60+(m||0)}
 
-  const GRID_START_HOUR=6, GRID_END_HOUR=23, PX_PER_HOUR=56;
+  const GRID_START_HOUR=0, GRID_END_HOUR=24, PX_PER_HOUR=48;
 
   // Раскладывает задачи одного дня по колонкам-дорожкам (lanes), если время пересекается.
   function layoutDayTasks(dayTasks){
@@ -307,6 +307,10 @@
     $("requestBadge").textContent=state.requests.length;$("requestBadge").classList.toggle("hidden",!state.requests.length);
   }
 
+  function setTaskModalNav(hidden){
+    document.body.classList.toggle("task-modal-open", !!hidden);
+  }
+
   function bindStatic(){
     qsa("[data-auth]").forEach(b=>b.onclick=()=>{state.authMode=b.dataset.auth;qsa("[data-auth]").forEach(x=>x.classList.toggle("active",x===b));$("nameField").classList.toggle("hidden",state.authMode!=="signup");$("authSubmit").textContent=state.authMode==="signup"?"Создать аккаунт":"Войти"});
     $("authForm").onsubmit=authSubmit;
@@ -321,7 +325,7 @@
     $("addTemplateBtn").onclick=()=>$("templateModal").classList.remove("hidden");
     $("taskRecurring").onchange=e=>$("recurrenceBox").classList.toggle("hidden",!e.target.checked);
     qsa('input[name="destination"]').forEach(r=>r.onchange=()=>$("proposalHint").classList.toggle("hidden",r.value!=="proposal"));
-    qsa("[data-close]").forEach(b=>b.onclick=()=>$(b.dataset.close).classList.add("hidden"));
+    qsa("[data-close]").forEach(b=>b.onclick=()=>{ $(b.dataset.close).classList.add("hidden"); if(b.dataset.close==="taskModal")setTaskModalNav(false); });
     $("taskForm").onsubmit=saveTask;
     $("templateForm").onsubmit=saveTemplate;
     $("saveSettings").onclick=saveSettings;
@@ -378,7 +382,7 @@
     const tasks=expandOccurrences(base,state.weekStart,7);
     const trackTop=GRID_START_HOUR*60, trackBottom=GRID_END_HOUR*60;
     const trackHeight=Math.round((trackBottom-trackTop)/60*PX_PER_HOUR);
-    const hourLines=[...Array(GRID_END_HOUR-GRID_START_HOUR)].map((_,i)=>
+    const hourLines=[...Array(GRID_END_HOUR-GRID_START_HOUR+1)].map((_,i)=>
       `<div class="hour-line" style="top:${i*PX_PER_HOUR}px" data-h="${String(GRID_START_HOUR+i).padStart(2,"0")}:00"></div>`
     ).join("");
     const todayStr=iso(new Date());
@@ -460,6 +464,7 @@
     qsa('input[name="destination"]').forEach(r=>r.checked=r.value===(task?.visibility==="shared"?"shared":"private"));
     $("proposalHint").classList.add("hidden");
     $("taskModal").classList.remove("hidden");
+    setTaskModalNav(true);
   }
 
   async function saveTask(e){
@@ -501,7 +506,9 @@
       qsa("[data-person]").forEach(x=>x.classList.toggle("active",x.dataset.person===state.person));
       state.weekStart=startOfWeek(new Date(base.date+"T00:00:00"));
     }
-    $("taskModal").classList.add("hidden");renderAll();toast(id?"Задача обновлена":dest==="proposal"?"Предложение отправлено":"Задача создана");
+    $("taskModal").classList.add("hidden");
+    setTaskModalNav(false);
+    renderAll();toast(id?"Задача обновлена":dest==="proposal"?"Предложение отправлено":"Задача создана");
   }
 
   window.weekToggle=async(id,checked)=>{
@@ -527,74 +534,22 @@
       <div class="actions"><button class="primary" onclick="window.acceptRequest('${r.id}')">Принять</button><button class="secondary" onclick="window.rejectRequest('${r.id}')">Отклонить</button><button class="secondary" onclick="window.counterRequest('${r.id}')">Предложить другое время</button></div>
     </div>`).join("");
   }
-window.acceptRequest = async id => {
-  const r = state.requests.find(x => x.id === id);
-  if (!r) return;
-
-  if (state.demo) {
-    demoData.requests = demoData.requests.filter(x => x.id !== id);
-
-    demoData.tasks.push({
-      id: uid(),
-      owner_id: currentUserId(),
-      visibility: "shared",
-      status: "open",
-      title: r.title,
-      description: r.description,
-      date: r.date,
-      start_time: r.start_time,
-      duration: r.duration,
-      category: r.category,
-      priority: r.priority
-    });
-
-    saveDemo();
-    loadDemo();
-  } else {
-    // Предложение принимает текущий пользователь,
-    // поэтому owner_id должен быть его собственным.
-    const { error: taskError } = await sb
-      .from("tasks")
-      .insert({
-        owner_id: state.user.id,
-        visibility: "shared",
-        status: "open",
-        title: r.title,
-        description: r.description,
-        date: r.date,
-        start_time: r.start_time,
-        duration: r.duration,
-        category: r.category,
-        priority: r.priority
-      });
-
-    if (taskError) {
-      toast(`Не удалось принять предложение: ${taskError.message}`);
-      return;
-    }
-
-    // После успешного создания общей задачи
-    // помечаем предложение как принятое.
-    const { error: requestError } = await sb
-      .from("task_requests")
-      .update({ status: "accepted" })
-      .eq("id", id)
-      .eq("to_user_id", state.user.id);
-
-    if (requestError) {
-      toast(
-        `Задача создана, но статус предложения не обновился: ${requestError.message}`
-      );
+  window.acceptRequest=async id=>{
+    const r=state.requests.find(x=>x.id===id);if(!r)return;
+    if(state.demo){demoData.requests=demoData.requests.filter(x=>x.id!==id);demoData.tasks.push({id:uid(),owner_id:r.from_user_id,visibility:"shared",status:"open",title:r.title,description:r.description,date:r.date,start_time:r.start_time,duration:r.duration,category:r.category,priority:r.priority});saveDemo();loadDemo()}
+    else{
+      // The recipient accepts the proposal, so the shared task must be created
+      // with the recipient as owner. RLS policies allow the authenticated user
+      // to insert rows only for their own owner_id. The shared visibility makes
+      // the task visible to both users.
+      const {error:taskError}=await sb.from("tasks").insert({owner_id:state.user.id,visibility:"shared",status:"open",title:r.title,description:r.description,date:r.date,start_time:r.start_time,duration:r.duration,category:r.category,priority:r.priority});
+      if(taskError){toast(`Не удалось принять предложение: ${taskError.message}`);return}
+      const {error:requestError}=await sb.from("task_requests").update({status:"accepted"}).eq("id",id).eq("to_user_id",state.user.id);
+      if(requestError){toast(`Задача создана, но статус предложения не обновился: ${requestError.message}`);await reloadCloud();return}
       await reloadCloud();
-      return;
     }
-
-    await reloadCloud();
-  }
-
-  renderAll();
-  toast("Предложение принято");
-};
+    renderAll();toast("Предложение принято");
+  };
   window.rejectRequest=async id=>{
     if(state.demo){demoData.requests=demoData.requests.map(r=>r.id===id?{...r,status:"rejected"}:r);demoData.requests=demoData.requests.filter(r=>r.status==="pending");saveDemo();loadDemo()}
     else{await sb.from("task_requests").update({status:"rejected"}).eq("id",id).eq("to_user_id",state.user.id);await reloadCloud()}
@@ -602,7 +557,9 @@ window.acceptRequest = async id => {
   };
   window.counterRequest=id=>{
     const r=state.requests.find(x=>x.id===id);if(!r)return;
-    $("taskModal").classList.remove("hidden");$("taskModalTitle").textContent="Предложить другое время";
+    $("taskModal").classList.remove("hidden");
+    setTaskModalNav(true);
+    $("taskModalTitle").textContent="Предложить другое время";
     $("taskId").value="";$("taskTitle").value=r.title;$("taskDescription").value=r.description||"";
     $("taskDate").value=r.date;$("taskTime").value=r.start_time?.slice(0,5)||"";$("taskDuration").value=r.duration||60;
     $("taskCategory").value=r.category||"Другое";$("taskPriority").value=r.priority||"desirable";
@@ -626,18 +583,65 @@ window.acceptRequest = async id => {
   function weekTasksForStats(){
     return expandOccurrences(state.tasks.filter(t=>t.status!=="archived"),state.weekStart,7);
   }
+  function freeWindowsForDay(dayTasks){
+    const timed=dayTasks.filter(t=>t.start_time).map(t=>({
+      start:Math.max(0,toMin(t.start_time)),
+      end:Math.min(1440,toMin(t.start_time)+minutes(t))
+    })).filter(x=>x.end>x.start).sort((a,b)=>a.start-b.start);
+    const gaps=[];
+    let cursor=0;
+    for(const x of timed){
+      if(x.start>cursor)gaps.push([cursor,x.start]);
+      cursor=Math.max(cursor,x.end);
+    }
+    if(cursor<1440)gaps.push([cursor,1440]);
+    return gaps.sort((a,b)=>(b[1]-b[0])-(a[1]-a[0])).slice(0,3);
+  }
+
+  function hm(min){
+    const h=Math.floor(min/60),m=min%60;
+    return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`;
+  }
+
   function renderStats(){
     const ts=weekTasksForStats(),total=ts.reduce((a,t)=>a+minutes(t),0),done=ts.filter(t=>t.status==="done").length;
-    const avg=total/7,loaded=[...Array(7)].map((_,i)=>ts.filter(t=>t.date===iso(new Date(state.weekStart.getTime()+i*86400000))).reduce((a,t)=>a+minutes(t),0));
+    const avg=total/7;
+    const loaded=[...Array(7)].map((_,i)=>ts.filter(t=>t.date===iso(new Date(state.weekStart.getTime()+i*86400000))).reduce((a,t)=>a+minutes(t),0));
     const max=loaded.indexOf(Math.max(...loaded));
     const weekEnd=new Date(state.weekStart.getTime()+7*86400000);
     const trackedMin=state.timeLogs.filter(l=>l.ended_at && new Date(l.started_at)>=state.weekStart && new Date(l.started_at)<weekEnd)
       .reduce((a,l)=>a+Math.round((new Date(l.ended_at)-new Date(l.started_at))/60000),0);
-    $("statsCards").innerHTML=[["Запланировано",`${Math.floor(total/60)}ч ${total%60}м`],["Задач",ts.length],["Выполнено",`${done}/${ts.length||0}`],["Среднее в день",`${Math.floor(avg/60)}ч ${Math.round(avg%60)}м`],["Отслежено таймером",`${Math.floor(trackedMin/60)}ч ${trackedMin%60}м`]].map(x=>`<div class="stat"><span class="muted">${x[0]}</span><strong>${x[1]}</strong></div>`).join("");
+    const pct=ts.length?Math.round(done/ts.length*100):0;
+    const busiest=loaded[max]||0;
+    $("statsCards").innerHTML=[
+      ["Запланировано",`${Math.floor(total/60)}ч ${total%60}м`],
+      ["Задач",ts.length],
+      ["Выполнено",`${done}/${ts.length||0}`],
+      ["Прогресс",`${pct}%`],
+      ["Среднее в день",`${Math.floor(avg/60)}ч ${Math.round(avg%60)}м`],
+      ["Отслежено таймером",`${Math.floor(trackedMin/60)}ч ${trackedMin%60}м`]
+    ].map(x=>`<div class="stat"><span class="muted">${x[0]}</span><strong>${x[1]}</strong></div>`).join("");
     const maxVal=Math.max(...loaded,1);
     $("statsBars").innerHTML=loaded.map((v,i)=>`<div class="bar-wrap"><div class="small">${Math.round(v/60*10)/10}ч</div><div class="bar" style="height:${Math.max(3,v/maxVal*170)}px"></div><div class="bar-label">${dayName(i)}</div></div>`).join("");
     const cats={};ts.forEach(t=>cats[t.category]=(cats[t.category]||0)+minutes(t));
-    $("categoryStats").innerHTML=Object.entries(cats).sort((a,b)=>b[1]-a[1]).map(([c,v])=>`<div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line)"><span>${esc(c)}</span><strong>${Math.floor(v/60)}ч ${v%60}м</strong></div>`).join("")||"<p class='muted'>Нет задач.</p>";
+    $("categoryStats").innerHTML=Object.entries(cats).sort((a,b)=>b[1]-a[1]).map(([c,v])=>`<div class="category-row"><span>${esc(c)}</span><strong>${Math.floor(v/60)}ч ${v%60}м</strong></div>`).join("")||"<p class='muted'>Нет задач.</p>";
+
+    const sentence=ts.length
+      ? `За неделю выполнено ${pct}% задач — ${done} из ${ts.length}. Самый загруженный день: ${dayName(max)} (${Math.floor(busiest/60)}ч ${busiest%60}м).`
+      : "На этой неделе пока нет задач. Можно спокойно начать с первой.";
+    const pulse=$("weekPulse");
+    if(pulse)pulse.innerHTML=`<strong>${esc(sentence)}</strong><span class="muted small">Свободное время считается только по задачам, которые тебе разрешено видеть.</span>`;
+
+    const free=$("freeTimeList");
+    if(free){
+      free.innerHTML=[...Array(7)].map((_,i)=>{
+        const ds=iso(new Date(state.weekStart.getTime()+i*86400000));
+        const dayTasks=ts.filter(t=>t.date===ds);
+        const gaps=freeWindowsForDay(dayTasks);
+        const gapsHtml=gaps.length?gaps.map(g=>`<span>${hm(g[0])}–${hm(g[1])}</span>`).join(""):`<span class="muted">нет свободного окна</span>`;
+        return `<div class="free-day"><div><strong>${dayName(i)}</strong><span class="muted small">${fmtDate(ds)}</span></div><div class="free-gaps">${gapsHtml}</div></div>`;
+      }).join("");
+    }
   }
 
   function renderSettings(){

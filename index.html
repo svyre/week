@@ -104,9 +104,11 @@
       </section>
 
       <section id="statsSection" class="section hidden">
+        <div id="weekPulse" class="week-pulse"></div>
         <div id="statsCards" class="stats-grid"></div>
         <div class="panel"><h2>Нагрузка по дням</h2><div id="statsBars" class="stats-bars"></div></div>
         <div class="panel"><h2>По категориям</h2><div id="categoryStats"></div></div>
+        <div class="panel"><div class="panel-head"><h2>Свободное время</h2><span class="muted small">00:00–24:00</span></div><div id="freeTimeList" class="free-time-list"></div></div>
       </section>
 
       <section id="settingsSection" class="section hidden">
@@ -114,7 +116,7 @@
           <h2>Настройки</h2>
           <label>Имя<input id="settingsName"></label>
           <div class="settings-card">
-            <div><strong>Уведомления</strong><p class="small muted">Push-уведомления приходят даже когда week. закрыт. На iPhone приложение должно быть добавлено на экран «Домой».</p><p id="notificationStatus" class="small muted">Проверка…</p></div>
+            <div><strong>Уведомления</strong><p class="small muted">Напоминания работают через Push даже когда week. закрыт. На iPhone приложение должно быть добавлено на экран «Домой».</p><p id="notificationStatus" class="small muted">Проверка…</p></div>
             <label class="switch"><input id="notificationsEnabled" type="checkbox"><span></span> Включить</label>
             <label>Напоминать за<select id="notificationLead"><option value="5">5 минут</option><option value="10">10 минут</option><option value="15" selected>15 минут</option><option value="30">30 минут</option></select></label>
             <button id="enableNotifications" class="secondary">Разрешить уведомления</button>
