@@ -803,10 +803,29 @@
     else{const {error}=await sb.from("friend_requests").update({status:"rejected"}).eq("id",id).eq("to_user_id",state.user.id);if(error){toast(error.message);return}await reloadCloud()}
     renderFriends();toast("Заявка отклонена");
   };
+  window.cancelFriendRequest=async id=>{
+    if(state.demo){demoData.friendRequests=(demoData.friendRequests||[]).filter(x=>x.id!==id);saveDemo();loadDemo()}
+    else{const {error}=await sb.from("friend_requests").delete().eq("id",id).eq("from_user_id",state.user.id);if(error){toast(error.message);return}await reloadCloud()}
+    renderFriends();toast("Заявка отменена");
+  };
+  window.unfriend=async id=>{
+    const f=friendById(id);if(!f)return;
+    if(!confirm(`Удалить ${f.display_name} из друзей? Общие задачи и предложения между вами останутся как есть.`))return;
+    if(state.demo){
+      demoData.friendships=(demoData.friendships||[]).filter(x=>!((x.user_a===currentUserId()&&x.user_b===id)||(x.user_a===id&&x.user_b===currentUserId())));
+      saveDemo();loadDemo();
+    }else{
+      const {error}=await sb.from("friendships").delete().or(`and(user_a.eq.${state.user.id},user_b.eq.${id}),and(user_a.eq.${id},user_b.eq.${state.user.id})`);
+      if(error){toast(error.message);return}
+      await reloadCloud();
+    }
+    renderAll();toast("Друг удалён");
+  };
   function renderFriends(){
-    const list=$("friendsList"), req=$("friendRequestsList");
-    list.innerHTML=state.friends.length?state.friends.map(f=>`<div class="friend-row"><div class="avatar mini">${esc((f.display_name||"П").slice(0,1).toUpperCase())}</div><div><strong>${esc(f.display_name)}</strong><div class="small muted">@${esc(f.username||"")}</div></div></div>`).join(""):'<p class="muted small">Пока нет друзей.</p>';
+    const list=$("friendsList"), req=$("friendRequestsList"), sent=$("sentFriendRequestsList");
+    list.innerHTML=state.friends.length?state.friends.map(f=>`<div class="friend-row"><div class="avatar mini">${esc((f.display_name||"П").slice(0,1).toUpperCase())}</div><div><strong>${esc(f.display_name)}</strong><div class="small muted">@${esc(f.username||"")}</div></div><div class="actions"><button class="secondary" onclick="window.unfriend('${f.id}')">Удалить</button></div></div>`).join(""):'<p class="muted small">Пока нет друзей.</p>';
     req.innerHTML=state.friendRequests.length?state.friendRequests.map(r=>{const f=(state.__profiles||[]).find(x=>x.id===r.from_user_id);return `<div class="friend-row"><div><strong>${esc(f?.display_name||"Новый друг")}</strong></div><div class="actions"><button class="primary" onclick="window.acceptFriend('${r.id}')">Принять</button><button class="secondary" onclick="window.rejectFriend('${r.id}')">Отклонить</button></div></div>`}).join(""):'<p class="muted small">Новых заявок нет.</p>';
+    if(sent)sent.innerHTML=state.sentFriendRequests.length?state.sentFriendRequests.map(r=>{const f=(state.__profiles||[]).find(x=>x.id===r.to_user_id);return `<div class="friend-row"><div><strong>${esc(f?.display_name||"Пользователь")}</strong><div class="small muted">Ожидает ответа</div></div><div class="actions"><button class="secondary" onclick="window.cancelFriendRequest('${r.id}')">Отменить</button></div></div>`}).join(""):'<p class="muted small">Отправленных заявок нет.</p>';
     $("friendBadge").textContent=state.friendRequests.length;$("friendBadge").classList.toggle("hidden",!state.friendRequests.length);
     fillFriendPicker($("taskFriend")?.value||state.friends[0]?.id||"");
   }

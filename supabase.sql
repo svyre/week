@@ -395,8 +395,14 @@ drop policy if exists "friendships_no_client_insert" on public.friendships;
 create policy "friendships_no_client_insert" on public.friendships for insert with check (false);
 drop policy if exists "friendships_no_client_update" on public.friendships;
 create policy "friendships_no_client_update" on public.friendships for update using (false) with check (false);
+-- Любая из двух сторон дружбы может её разорвать ("удалить друга").
 drop policy if exists "friendships_no_client_delete" on public.friendships;
-create policy "friendships_no_client_delete" on public.friendships for delete using (false);
+drop policy if exists "friendships_delete_own" on public.friendships;
+create policy "friendships_delete_own" on public.friendships for delete using (user_a=auth.uid() or user_b=auth.uid());
+
+-- Отправитель может отменить свою ещё не рассмотренную заявку в друзья.
+drop policy if exists "friend_requests_delete_sender" on public.friend_requests;
+create policy "friend_requests_delete_sender" on public.friend_requests for delete using (from_user_id=auth.uid() and status='pending');
 
 -- A task member can only be added by the task owner, and only if the other
 -- person is that owner's friend. This prevents arbitrary cross-account access.
