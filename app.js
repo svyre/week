@@ -7,7 +7,7 @@
 
   let state = {
     user:null, profile:null, section:"week", person:"me",
-    weekStart: startOfWeek(new Date()), tasks:[], requests:[], templates:[], timeLogs:[], activeTimer:null,
+    weekStart: startOfWeek(new Date()), currentDate: new Date(), tasks:[], requests:[], templates:[], timeLogs:[], activeTimer:null,
     demo: !hasSupabase, authMode:"login"
   };
 
@@ -33,7 +33,8 @@
   function minutes(t){return Number(t.duration)||60}
   function toMin(t){const [h,m]=t.slice(0,5).split(":").map(Number);return h*60+(m||0)}
 
-  const GRID_START_HOUR=0, GRID_END_HOUR=24, PX_PER_HOUR=48;
+  const APP_CFG=window.APP_CONFIG||{};
+  const GRID_START_HOUR=Number(APP_CFG.dayStartHour??0), GRID_END_HOUR=Number(APP_CFG.dayEndHour??24), PX_PER_HOUR=56;
 
   // Раскладывает задачи одного дня по колонкам-дорожкам (lanes), если время пересекается.
   function layoutDayTasks(dayTasks){
@@ -307,10 +308,6 @@
     $("requestBadge").textContent=state.requests.length;$("requestBadge").classList.toggle("hidden",!state.requests.length);
   }
 
-  function setTaskModalNav(hidden){
-    document.body.classList.toggle("task-modal-open", !!hidden);
-  }
-
   function bindStatic(){
     qsa("[data-auth]").forEach(b=>b.onclick=()=>{state.authMode=b.dataset.auth;qsa("[data-auth]").forEach(x=>x.classList.toggle("active",x===b));$("nameField").classList.toggle("hidden",state.authMode!=="signup");$("authSubmit").textContent=state.authMode==="signup"?"Создать аккаунт":"Войти"});
     $("authForm").onsubmit=authSubmit;
@@ -318,17 +315,22 @@
     $("logoutBtn").onclick=logout;
     qsa(".nav-btn").forEach(b=>b.onclick=()=>switchSection(b.dataset.section));
     qsa("[data-person]").forEach(b=>b.onclick=()=>{state.person=b.dataset.person;qsa("[data-person]").forEach(x=>x.classList.toggle("active",x===b));renderWeek()});
-    $("prevWeek").onclick=()=>{state.weekStart.setDate(state.weekStart.getDate()-7);renderWeek()};
-    $("nextWeek").onclick=()=>{state.weekStart.setDate(state.weekStart.getDate()+7);renderWeek()};
-    $("todayBtn").onclick=()=>{state.weekStart=startOfWeek(new Date());renderWeek()};
+    $("prevWeek").onclick=()=>moveDay(-1);
+    $("nextWeek").onclick=()=>moveDay(1);
+    $("todayBtn").onclick=()=>goToday();
+    document.addEventListener("keydown",e=>{if(state.section!=="week"||$("taskModal")?.classList.contains("hidden")===false)return;if(e.key==="ArrowLeft")moveDay(-1);if(e.key==="ArrowRight")moveDay(1)});
+    let touchX=null;
+    $("weekGrid").addEventListener("touchstart",e=>{touchX=e.changedTouches[0].clientX},{passive:true});
+    $("weekGrid").addEventListener("touchend",e=>{if(touchX===null)return;const dx=e.changedTouches[0].clientX-touchX;touchX=null;if(Math.abs(dx)>45)moveDay(dx<0?1:-1)},{passive:true});
     $("addTaskBtn").onclick=()=>openTask();
     $("addTemplateBtn").onclick=()=>$("templateModal").classList.remove("hidden");
     $("taskRecurring").onchange=e=>$("recurrenceBox").classList.toggle("hidden",!e.target.checked);
     qsa('input[name="destination"]').forEach(r=>r.onchange=()=>$("proposalHint").classList.toggle("hidden",r.value!=="proposal"));
-    qsa("[data-close]").forEach(b=>b.onclick=()=>{ $(b.dataset.close).classList.add("hidden"); if(b.dataset.close==="taskModal")setTaskModalNav(false); });
+    qsa("[data-close]").forEach(b=>b.onclick=()=>$(b.dataset.close).classList.add("hidden"));
     $("taskForm").onsubmit=saveTask;
     $("templateForm").onsubmit=saveTemplate;
     $("saveSettings").onclick=saveSettings;
+    if($("themeSelect")){$("themeSelect").value=localStorage.getItem("week-theme")||APP_CFG.theme||"system";$("themeSelect").onchange=e=>applyTheme(e.target.value)}
     $("exportBtn").onclick=exportData;
     $("importFile").onchange=importData;
     $("notificationsEnabled").onchange=async e=>{if(e.target.checked){await enableNotifications();updateNotificationStatus()}else{saveNotificationSettings();scheduleNotifications();await disablePushNotifications();updateNotificationStatus()}};
@@ -364,7 +366,6 @@
     $("profileName").textContent=state.profile?.display_name||"Пользователь";
     $("profileEmail").textContent=state.profile?.email||state.user?.email||"";
     $("avatar").textContent=(state.profile?.display_name||"П").slice(0,1).toUpperCase();
-    $("weekLabel").textContent=`${fmtDate(iso(state.weekStart))} — ${fmtDate(iso(new Date(state.weekStart.getTime()+6*86400000)))}`;
     renderWeek();renderRequests();renderTemplates();renderStats();renderSettings();updateTimerBar();
   }
 
@@ -376,46 +377,66 @@
     return tasks;
   }
 
+  function selectedDate(){return new Date(state.currentDate.getFullYear(),state.currentDate.getMonth(),state.currentDate.getDate())}
+  function syncWeekStart(){state.weekStart=startOfWeek(selectedDate())}
+  function moveDay(delta){state.currentDate.setDate(state.currentDate.getDate()+delta);syncWeekStart();renderWeek();renderStats()}
+  function goToday(){state.currentDate=new Date();syncWeekStart();renderWeek();renderStats()}
+  function isToday(ds){return ds===iso(new Date())}
+  function dayTitle(ds){
+    const d=new Date(ds+"T00:00:00");
+    const weekday=new Intl.DateTimeFormat("ru-RU",{weekday:"long"}).format(d);
+    const date=new Intl.DateTimeFormat("ru-RU",{day:"numeric",month:"long"}).format(d);
+    return `${weekday[0].toUpperCase()+weekday.slice(1)}, ${date}`;
+  }
+
   function renderWeek(){
-    $("weekLabel").textContent=`${fmtDate(iso(state.weekStart))} — ${fmtDate(iso(new Date(state.weekStart.getTime()+6*86400000)))}`;
+    const ds=iso(selectedDate());
+    syncWeekStart();
+    $("weekLabel").textContent=isToday(ds)?"Сегодня":"";
+    $("sectionTitle").textContent=dayTitle(ds);
     const base=visibleTasks();
-    const tasks=expandOccurrences(base,state.weekStart,7);
-    const trackTop=GRID_START_HOUR*60, trackBottom=GRID_END_HOUR*60;
-    const trackHeight=Math.round((trackBottom-trackTop)/60*PX_PER_HOUR);
-    const hourLines=[...Array(GRID_END_HOUR-GRID_START_HOUR+1)].map((_,i)=>
-      `<div class="hour-line" style="top:${i*PX_PER_HOUR}px" data-h="${String(GRID_START_HOUR+i).padStart(2,"0")}:00"></div>`
-    ).join("");
-    const todayStr=iso(new Date());
-    let html="";
-    for(let i=0;i<7;i++){
-      const d=new Date(state.weekStart);d.setDate(d.getDate()+i);const ds=iso(d);
-      const dayTasks=tasks.filter(t=>t.date===ds);
-      const total=dayTasks.reduce((a,t)=>a+minutes(t),0), pct=Math.min(100,total/600*100);
-      const level=total>480?"high":total>300?"mid":"low";
-      const untimed=dayTasks.filter(t=>!t.start_time);
-      const placed=layoutDayTasks(dayTasks);
-      const blocks=placed.map(t=>{
-        const top=Math.max(0,(t._start-trackTop)/60*PX_PER_HOUR);
-        const height=Math.max(30,(t._end-t._start)/60*PX_PER_HOUR);
-        const widthPct=100/t._laneCount, leftPct=t._lane*widthPct;
-        return `<div class="track-task" style="top:${top}px;height:${height}px;left:${leftPct}%;width:calc(${widthPct}% - 4px)">${taskBlockHtml(t)}</div>`;
-      }).join("");
-      let nowLine="";
-      if(ds===todayStr){
-        const nowMin=new Date().getHours()*60+new Date().getMinutes();
-        if(nowMin>=trackTop&&nowMin<=trackBottom){
-          nowLine=`<div class="now-line" style="top:${(nowMin-trackTop)/60*PX_PER_HOUR}px"></div>`;
-        }
-      }
-      html+=`<div class="day-col">
-        <div class="day-head"><span class="day-name">${dayName(i)}</span><span class="day-date">${fmtDate(ds)}</span></div>
-        <div class="load-line"><span class="${level}" style="width:${pct}%"></span></div>
-        <div class="small muted">${Math.floor(total/60)} ч ${total%60} мин</div>
-        ${untimed.length?`<div class="untimed-list">${untimed.map(taskChipHtml).join("")}</div>`:""}
-        <div class="day-track" style="height:${trackHeight}px">${hourLines}${nowLine}${blocks}</div>
-      </div>`;
+    const tasks=expandOccurrences(base,selectedDate(),1).filter(t=>t.date===ds);
+    const timed=tasks.filter(t=>t.start_time);
+    const total=tasks.reduce((a,t)=>a+minutes(t),0);
+    const level=total>480?"high":total>300?"mid":"low";
+    const untimed=tasks.filter(t=>!t.start_time);
+    let trackTop=GRID_START_HOUR*60, trackBottom=GRID_END_HOUR*60;
+    if(timed.length){
+      const minStart=Math.min(...timed.map(t=>toMin(t.start_time)));
+      const maxEnd=Math.max(...timed.map(t=>toMin(t.start_time)+minutes(t)));
+      trackTop=Math.max(GRID_START_HOUR*60,Math.floor(minStart/60)*60-60);
+      trackBottom=Math.min(GRID_END_HOUR*60,Math.ceil(maxEnd/60)*60+60);
+      if(trackBottom-trackTop<180)trackBottom=Math.min(GRID_END_HOUR*60,trackTop+180);
     }
-    $("weekGrid").innerHTML=html;
+    const trackHeight=Math.max(180,Math.round((trackBottom-trackTop)/60*PX_PER_HOUR));
+    const hourCount=Math.max(1,Math.round((trackBottom-trackTop)/60));
+    const hourLines=[...Array(hourCount+1)].map((_,i)=>`<div class="hour-line" style="top:${i*PX_PER_HOUR}px" data-h="${String(Math.floor((trackTop+i*60)/60)).padStart(2,"0")}:00"></div>`).join("");
+    const placed=layoutDayTasks(tasks);
+    const blocks=placed.map(t=>{
+      const top=Math.max(0,(t._start-trackTop)/60*PX_PER_HOUR);
+      const height=Math.max(30,(t._end-t._start)/60*PX_PER_HOUR);
+      const widthPct=100/t._laneCount,leftPct=t._lane*widthPct;
+      return `<div class="track-task" style="top:${top}px;height:${height}px;left:${leftPct}%;width:calc(${widthPct}% - 4px)">${taskBlockHtml(t)}</div>`;
+    }).join("");
+    let nowLine="";
+    if(isToday(ds)){const nowMin=new Date().getHours()*60+new Date().getMinutes();if(nowMin>=trackTop&&nowMin<=trackBottom)nowLine=`<div class="now-line" style="top:${(nowMin-trackTop)/60*PX_PER_HOUR}px"></div>`}
+    const empty=!tasks.length;
+    $("weekGrid").innerHTML=`<div class="day-col ${isToday(ds)?"today-day":""}">
+      <div class="day-head"><div><span class="day-name">${dayTitle(ds)}</span><div class="small muted">${isToday(ds)?"Текущий день":""}</div></div><span class="day-date">${fmtDate(ds)}</span></div>
+      <div class="day-summary"><div><strong>${tasks.length}</strong><span> ${tasks.length===1?"задача":"задач"}</span></div><div class="load-line"><span class="${level}" style="width:${Math.min(100,total/600*100)}%"></span></div><span class="small muted">${Math.floor(total/60)} ч ${total%60} мин</span></div>
+      ${untimed.length?`<div class="untimed-list">${untimed.map(taskChipHtml).join("")}</div>`:""}
+      ${empty?`<div class="empty-day"><div class="empty-icon">○</div><strong>День свободен</strong><span>Здесь пока нет задач</span><button class="secondary" onclick="window.openTaskForDate('${ds}')">+ Добавить задачу</button></div>`:`<div class="day-track" style="height:${trackHeight}px">${hourLines}${nowLine}${blocks}</div>`}
+    </div>`;
+    $("prevWeek").classList.toggle("muted-nav",false);
+  }
+
+  window.openTaskForDate=ds=>{openTask();$("taskDate").value=ds};
+
+  function applyTheme(theme){
+    localStorage.setItem("week-theme",theme);
+    const resolved=theme==="system"?(window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"):theme;
+    document.documentElement.dataset.theme=resolved;
+    const meta=$("themeColor");if(meta)meta.setAttribute("content",resolved==="dark"?"#101114":"#f4f3ef");
   }
 
   function timerButtonHtml(actionId){
@@ -451,7 +472,7 @@
     $("taskId").value=task?.id||"";
     $("taskTitle").value=task?.title||"";
     $("taskDescription").value=task?.description||"";
-    $("taskDate").value=task?.date||iso(new Date());
+    $("taskDate").value=task?.date||iso(selectedDate());
     $("taskTime").value=task?.start_time?.slice(0,5)||"";
     $("taskDuration").value=task?.duration||Number(localStorage.getItem("week-default-duration")||60);
     $("taskDeadline").value=task?.deadline?new Date(task.deadline).toISOString().slice(0,16):"";
@@ -464,7 +485,6 @@
     qsa('input[name="destination"]').forEach(r=>r.checked=r.value===(task?.visibility==="shared"?"shared":"private"));
     $("proposalHint").classList.add("hidden");
     $("taskModal").classList.remove("hidden");
-    setTaskModalNav(true);
   }
 
   async function saveTask(e){
@@ -504,11 +524,9 @@
     if(dest!=="proposal"){
       state.person=dest==="shared"?"shared":"me";
       qsa("[data-person]").forEach(x=>x.classList.toggle("active",x.dataset.person===state.person));
-      state.weekStart=startOfWeek(new Date(base.date+"T00:00:00"));
+      state.currentDate=new Date(base.date+"T00:00:00"); state.weekStart=startOfWeek(state.currentDate);
     }
-    $("taskModal").classList.add("hidden");
-    setTaskModalNav(false);
-    renderAll();toast(id?"Задача обновлена":dest==="proposal"?"Предложение отправлено":"Задача создана");
+    $("taskModal").classList.add("hidden");renderAll();toast(id?"Задача обновлена":dest==="proposal"?"Предложение отправлено":"Задача создана");
   }
 
   window.weekToggle=async(id,checked)=>{
@@ -557,9 +575,7 @@
   };
   window.counterRequest=id=>{
     const r=state.requests.find(x=>x.id===id);if(!r)return;
-    $("taskModal").classList.remove("hidden");
-    setTaskModalNav(true);
-    $("taskModalTitle").textContent="Предложить другое время";
+    $("taskModal").classList.remove("hidden");$("taskModalTitle").textContent="Предложить другое время";
     $("taskId").value="";$("taskTitle").value=r.title;$("taskDescription").value=r.description||"";
     $("taskDate").value=r.date;$("taskTime").value=r.start_time?.slice(0,5)||"";$("taskDuration").value=r.duration||60;
     $("taskCategory").value=r.category||"Другое";$("taskPriority").value=r.priority||"desirable";
@@ -583,70 +599,24 @@
   function weekTasksForStats(){
     return expandOccurrences(state.tasks.filter(t=>t.status!=="archived"),state.weekStart,7);
   }
-  function freeWindowsForDay(dayTasks){
-    const timed=dayTasks.filter(t=>t.start_time).map(t=>({
-      start:Math.max(0,toMin(t.start_time)),
-      end:Math.min(1440,toMin(t.start_time)+minutes(t))
-    })).filter(x=>x.end>x.start).sort((a,b)=>a.start-b.start);
-    const gaps=[];
-    let cursor=0;
-    for(const x of timed){
-      if(x.start>cursor)gaps.push([cursor,x.start]);
-      cursor=Math.max(cursor,x.end);
-    }
-    if(cursor<1440)gaps.push([cursor,1440]);
-    return gaps.sort((a,b)=>(b[1]-b[0])-(a[1]-a[0])).slice(0,3);
-  }
-
-  function hm(min){
-    const h=Math.floor(min/60),m=min%60;
-    return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`;
-  }
-
   function renderStats(){
     const ts=weekTasksForStats(),total=ts.reduce((a,t)=>a+minutes(t),0),done=ts.filter(t=>t.status==="done").length;
-    const avg=total/7;
-    const loaded=[...Array(7)].map((_,i)=>ts.filter(t=>t.date===iso(new Date(state.weekStart.getTime()+i*86400000))).reduce((a,t)=>a+minutes(t),0));
+    const avg=total/7,loaded=[...Array(7)].map((_,i)=>ts.filter(t=>t.date===iso(new Date(state.weekStart.getTime()+i*86400000))).reduce((a,t)=>a+minutes(t),0));
     const max=loaded.indexOf(Math.max(...loaded));
     const weekEnd=new Date(state.weekStart.getTime()+7*86400000);
     const trackedMin=state.timeLogs.filter(l=>l.ended_at && new Date(l.started_at)>=state.weekStart && new Date(l.started_at)<weekEnd)
       .reduce((a,l)=>a+Math.round((new Date(l.ended_at)-new Date(l.started_at))/60000),0);
-    const pct=ts.length?Math.round(done/ts.length*100):0;
-    const busiest=loaded[max]||0;
-    $("statsCards").innerHTML=[
-      ["Запланировано",`${Math.floor(total/60)}ч ${total%60}м`],
-      ["Задач",ts.length],
-      ["Выполнено",`${done}/${ts.length||0}`],
-      ["Прогресс",`${pct}%`],
-      ["Среднее в день",`${Math.floor(avg/60)}ч ${Math.round(avg%60)}м`],
-      ["Отслежено таймером",`${Math.floor(trackedMin/60)}ч ${trackedMin%60}м`]
-    ].map(x=>`<div class="stat"><span class="muted">${x[0]}</span><strong>${x[1]}</strong></div>`).join("");
+    $("statsCards").innerHTML=[["Запланировано",`${Math.floor(total/60)}ч ${total%60}м`],["Задач",ts.length],["Выполнено",`${done}/${ts.length||0}`],["Среднее в день",`${Math.floor(avg/60)}ч ${Math.round(avg%60)}м`],["Отслежено таймером",`${Math.floor(trackedMin/60)}ч ${trackedMin%60}м`]].map(x=>`<div class="stat"><span class="muted">${x[0]}</span><strong>${x[1]}</strong></div>`).join("");
     const maxVal=Math.max(...loaded,1);
     $("statsBars").innerHTML=loaded.map((v,i)=>`<div class="bar-wrap"><div class="small">${Math.round(v/60*10)/10}ч</div><div class="bar" style="height:${Math.max(3,v/maxVal*170)}px"></div><div class="bar-label">${dayName(i)}</div></div>`).join("");
     const cats={};ts.forEach(t=>cats[t.category]=(cats[t.category]||0)+minutes(t));
-    $("categoryStats").innerHTML=Object.entries(cats).sort((a,b)=>b[1]-a[1]).map(([c,v])=>`<div class="category-row"><span>${esc(c)}</span><strong>${Math.floor(v/60)}ч ${v%60}м</strong></div>`).join("")||"<p class='muted'>Нет задач.</p>";
-
-    const sentence=ts.length
-      ? `За неделю выполнено ${pct}% задач — ${done} из ${ts.length}. Самый загруженный день: ${dayName(max)} (${Math.floor(busiest/60)}ч ${busiest%60}м).`
-      : "На этой неделе пока нет задач. Можно спокойно начать с первой.";
-    const pulse=$("weekPulse");
-    if(pulse)pulse.innerHTML=`<strong>${esc(sentence)}</strong><span class="muted small">Свободное время считается только по задачам, которые тебе разрешено видеть.</span>`;
-
-    const free=$("freeTimeList");
-    if(free){
-      free.innerHTML=[...Array(7)].map((_,i)=>{
-        const ds=iso(new Date(state.weekStart.getTime()+i*86400000));
-        const dayTasks=ts.filter(t=>t.date===ds);
-        const gaps=freeWindowsForDay(dayTasks);
-        const gapsHtml=gaps.length?gaps.map(g=>`<span>${hm(g[0])}–${hm(g[1])}</span>`).join(""):`<span class="muted">нет свободного окна</span>`;
-        return `<div class="free-day"><div><strong>${dayName(i)}</strong><span class="muted small">${fmtDate(ds)}</span></div><div class="free-gaps">${gapsHtml}</div></div>`;
-      }).join("");
-    }
+    $("categoryStats").innerHTML=Object.entries(cats).sort((a,b)=>b[1]-a[1]).map(([c,v])=>`<div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line)"><span>${esc(c)}</span><strong>${Math.floor(v/60)}ч ${v%60}м</strong></div>`).join("")||"<p class='muted'>Нет задач.</p>";
   }
 
   function renderSettings(){
     $("settingsName").value=state.profile?.display_name||"";
     $("defaultDuration").value=localStorage.getItem("week-default-duration")||60;
+    if($("themeSelect"))$("themeSelect").value=localStorage.getItem("week-theme")||APP_CFG.theme||"system";
     const ns=notificationSettings();
     if($("notificationsEnabled")){ $("notificationsEnabled").checked=ns.enabled; $("notificationLead").value=String(ns.lead); }
   }
@@ -667,5 +637,7 @@
   }
 
   setInterval(async()=>{if(!state.demo && state.user){const before=state.requests.length;await reloadCloud();if(state.requests.length>before && "Notification" in window && Notification.permission==="granted" && notificationSettings().enabled)new Notification("week.",{body:"Новое предложение задачи",tag:"week-request"});renderRequests();}},60000);
+  applyTheme(localStorage.getItem("week-theme")||APP_CFG.theme||"system");
+  if(window.matchMedia){window.matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change",()=>{if((localStorage.getItem("week-theme")||APP_CFG.theme)==="system")applyTheme("system")})}
   boot();
 })();

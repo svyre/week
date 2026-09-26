@@ -3,10 +3,12 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="theme-color" content="#111318">
+  <meta name="theme-color" content="#f4f3ef" id="themeColor">
+  <meta name="apple-mobile-web-app-title" content="week.">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="week.png">
   <title>week. — планировщик</title>
   <link rel="stylesheet" href="style.css">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -55,11 +57,10 @@
     <main class="main">
       <header class="topbar">
         <div>
-          <h1 id="sectionTitle">Неделя</h1>
+          <h1 id="sectionTitle">Сегодня</h1>
           <p id="weekLabel" class="muted"></p>
         </div>
         <div class="top-actions">
-          <button id="todayBtn" class="secondary">Сегодня</button>
           <button id="addTaskBtn" class="primary add-task">+ Добавить задачу</button>
         </div>
       </header>
@@ -75,8 +76,9 @@
           <button class="tab" data-person="shared">Общие</button>
         </div>
         <div class="week-controls">
-          <button id="prevWeek" class="icon-btn">←</button>
-          <button id="nextWeek" class="icon-btn">→</button>
+          <button id="prevWeek" class="icon-btn" aria-label="Предыдущий день">←</button>
+          <button id="todayBtn" class="secondary today-chip">Сегодня</button>
+          <button id="nextWeek" class="icon-btn" aria-label="Следующий день">→</button>
           <div class="load-legend">
             <span><i class="dot low"></i> свободно</span>
             <span><i class="dot mid"></i> средне</span>
@@ -104,19 +106,21 @@
       </section>
 
       <section id="statsSection" class="section hidden">
-        <div id="weekPulse" class="week-pulse"></div>
         <div id="statsCards" class="stats-grid"></div>
         <div class="panel"><h2>Нагрузка по дням</h2><div id="statsBars" class="stats-bars"></div></div>
         <div class="panel"><h2>По категориям</h2><div id="categoryStats"></div></div>
-        <div class="panel"><div class="panel-head"><h2>Свободное время</h2><span class="muted small">00:00–24:00</span></div><div id="freeTimeList" class="free-time-list"></div></div>
       </section>
 
       <section id="settingsSection" class="section hidden">
         <div class="panel settings-panel">
           <h2>Настройки</h2>
           <label>Имя<input id="settingsName"></label>
+          <div class="settings-card appearance-card">
+            <div><strong>Внешний вид</strong><p class="small muted">Можно использовать тему устройства или выбрать светлую/тёмную.</p></div>
+            <label>Тема<select id="themeSelect"><option value="system">Как на устройстве</option><option value="light">Светлая</option><option value="dark">Тёмная</option></select></label>
+          </div>
           <div class="settings-card">
-            <div><strong>Уведомления</strong><p class="small muted">Напоминания работают через Push даже когда week. закрыт. На iPhone приложение должно быть добавлено на экран «Домой».</p><p id="notificationStatus" class="small muted">Проверка…</p></div>
+            <div><strong>Уведомления</strong><p class="small muted">Push-уведомления приходят даже когда week. закрыт. На iPhone приложение должно быть добавлено на экран «Домой».</p><p id="notificationStatus" class="small muted">Проверка…</p></div>
             <label class="switch"><input id="notificationsEnabled" type="checkbox"><span></span> Включить</label>
             <label>Напоминать за<select id="notificationLead"><option value="5">5 минут</option><option value="10">10 минут</option><option value="15" selected>15 минут</option><option value="30">30 минут</option></select></label>
             <button id="enableNotifications" class="secondary">Разрешить уведомления</button>

@@ -5,3 +5,13 @@ window.SUPABASE_URL = "https://slxnlvvdwluhszwvwgmo.supabase.co";
 window.SUPABASE_ANON_KEY = "sb_publishable_vH0WRgUVYChtiv-KdLhDrw_UhmpL1OO";
 
 window.VAPID_PUBLIC_KEY = "BNfG7M3iYfaCaxA8fOz6Y8JGjUL14S8mq_xpizFZ76ZP08Xg6mUdYS8FxfbBynuOmRlUpb6vQJFGeikjSa6MeLo";
+
+window.APP_CONFIG = {
+  appName: "week.",
+  weekStartsOn: 1,
+  timeFormat: "24h",
+  dayStartHour: 0,
+  dayEndHour: 24,
+  defaultView: "today",
+  theme: "system"
+};
