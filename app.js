@@ -358,7 +358,7 @@
     state.section=s;
     qsa(".nav-btn").forEach(b=>b.classList.toggle("active",b.dataset.section===s));
     ["week","requests","templates","stats","settings"].forEach(x=>$(`${x}Section`).classList.toggle("hidden",x!==s));
-    $("sectionTitle").textContent={week:"Неделя",requests:"Предложения",templates:"Частые задачи",stats:"Статистика",settings:"Настройки"}[s];
+    if(s==="week")renderWeek();else $("sectionTitle").textContent={requests:"Предложения",templates:"Частые задачи",stats:"Статистика",settings:"Настройки"}[s];
     if(s==="requests")renderRequests();if(s==="templates")renderTemplates();if(s==="stats")renderStats();if(s==="settings")renderSettings();
   }
 
