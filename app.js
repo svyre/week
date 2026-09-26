@@ -527,17 +527,74 @@
       <div class="actions"><button class="primary" onclick="window.acceptRequest('${r.id}')">Принять</button><button class="secondary" onclick="window.rejectRequest('${r.id}')">Отклонить</button><button class="secondary" onclick="window.counterRequest('${r.id}')">Предложить другое время</button></div>
     </div>`).join("");
   }
-  window.acceptRequest=async id=>{
-    const r=state.requests.find(x=>x.id===id);if(!r)return;
-    if(state.demo){demoData.requests=demoData.requests.filter(x=>x.id!==id);demoData.tasks.push({id:uid(),owner_id:r.from_user_id,visibility:"shared",status:"open",title:r.title,description:r.description,date:r.date,start_time:r.start_time,duration:r.duration,category:r.category,priority:r.priority});saveDemo();loadDemo()}
-    else{
-      const {error}=await sb.from("tasks").insert({owner_id:r.from_user_id,visibility:"shared",status:"open",title:r.title,description:r.description,date:r.date,start_time:r.start_time,duration:r.duration,category:r.category,priority:r.priority});
-      if(error){toast(error.message);return}
-      await sb.from("task_requests").update({status:"accepted"}).eq("id",id).eq("to_user_id",state.user.id);
-      await reloadCloud();
+window.acceptRequest = async id => {
+  const r = state.requests.find(x => x.id === id);
+  if (!r) return;
+
+  if (state.demo) {
+    demoData.requests = demoData.requests.filter(x => x.id !== id);
+
+    demoData.tasks.push({
+      id: uid(),
+      owner_id: currentUserId(),
+      visibility: "shared",
+      status: "open",
+      title: r.title,
+      description: r.description,
+      date: r.date,
+      start_time: r.start_time,
+      duration: r.duration,
+      category: r.category,
+      priority: r.priority
+    });
+
+    saveDemo();
+    loadDemo();
+  } else {
+    // Предложение принимает текущий пользователь,
+    // поэтому owner_id должен быть его собственным.
+    const { error: taskError } = await sb
+      .from("tasks")
+      .insert({
+        owner_id: state.user.id,
+        visibility: "shared",
+        status: "open",
+        title: r.title,
+        description: r.description,
+        date: r.date,
+        start_time: r.start_time,
+        duration: r.duration,
+        category: r.category,
+        priority: r.priority
+      });
+
+    if (taskError) {
+      toast(`Не удалось принять предложение: ${taskError.message}`);
+      return;
     }
-    renderAll();toast("Предложение принято");
-  };
+
+    // После успешного создания общей задачи
+    // помечаем предложение как принятое.
+    const { error: requestError } = await sb
+      .from("task_requests")
+      .update({ status: "accepted" })
+      .eq("id", id)
+      .eq("to_user_id", state.user.id);
+
+    if (requestError) {
+      toast(
+        `Задача создана, но статус предложения не обновился: ${requestError.message}`
+      );
+      await reloadCloud();
+      return;
+    }
+
+    await reloadCloud();
+  }
+
+  renderAll();
+  toast("Предложение принято");
+};
   window.rejectRequest=async id=>{
     if(state.demo){demoData.requests=demoData.requests.map(r=>r.id===id?{...r,status:"rejected"}:r);demoData.requests=demoData.requests.filter(r=>r.status==="pending");saveDemo();loadDemo()}
     else{await sb.from("task_requests").update({status:"rejected"}).eq("id",id).eq("to_user_id",state.user.id);await reloadCloud()}
