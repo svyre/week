@@ -354,6 +354,8 @@
     $("onboardingForm").onsubmit=finishOnboarding;
     $("onboardingNext").onclick=onboardingNext;
     $("onboardingBack").onclick=onboardingBack;
+    $("onboardingClose").onclick=dismissOnboarding;
+    $("onboardingSkip").onclick=dismissOnboarding;
     $("addSchoolItem").onclick=()=>addScheduleEditorRow("school");
     $("addExtraItem").onclick=()=>addScheduleEditorRow("extra");
     $("editScheduleBtn").onclick=()=>openOnboarding();
@@ -406,7 +408,12 @@
 
 
   const DAY_OPTIONS=[["1","Пн"],["2","Вт"],["3","Ср"],["4","Чт"],["5","Пт"],["6","Сб"],["0","Вс"]];
-  function maybeShowOnboarding(){if(state.profile&&!state.profile.onboarding_completed)openOnboarding();}
+  function maybeShowOnboarding(){if(state.profile&&!state.profile.onboarding_completed&&localStorage.getItem("week-onboarding-dismissed")!=="1")openOnboarding();}
+  window.dismissOnboarding=()=>{
+    localStorage.setItem("week-onboarding-dismissed","1");
+    $("onboardingModal").classList.add("hidden");
+    toast("Хорошо, можно заполнить это позже в Настройках → «Изменить расписание»");
+  };
   function openOnboarding(){
     state.onboardingStep=1;
     const school=state.profile?.studies_at_school===true?"yes":state.profile?.studies_at_school===false?"no":"";

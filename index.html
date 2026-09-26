@@ -153,7 +153,7 @@
 
   <div id="onboardingModal" class="modal hidden">
     <div class="modal-card onboarding-card">
-      <div class="modal-head"><div><div class="eyebrow">Первичная настройка</div><h2 id="onboardingTitle">Расскажем week. о твоём расписании</h2></div></div>
+      <div class="modal-head"><div><div class="eyebrow">Первичная настройка</div><h2 id="onboardingTitle">Расскажем week. о твоём расписании</h2></div><button type="button" class="close" id="onboardingClose">×</button></div>
       <div id="onboardingProgress" class="onboarding-progress"><span class="active"></span><span></span><span></span><span></span></div>
       <form id="onboardingForm">
         <section class="onboarding-step" data-step="1">
@@ -183,6 +183,7 @@
           <p id="extraScheduleEmpty" class="muted small hidden">Пока ничего нет.</p>
         </section>
         <div class="modal-actions onboarding-actions">
+          <button type="button" class="link-btn" id="onboardingSkip">Заполнить позже</button>
           <button type="button" class="secondary" id="onboardingBack">Назад</button>
           <button type="button" class="primary" id="onboardingNext">Далее</button>
           <button type="submit" class="primary hidden" id="onboardingFinish">Готово</button>
