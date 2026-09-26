@@ -174,3 +174,7 @@ button:active{transform:scale(.97)}
 
 .section:not(.hidden){animation:week-section-in .22s ease both}
 @keyframes week-section-in{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
+
+/* Friends */
+.friend-search{display:flex;gap:10px;margin:16px 0 20px}.friend-search input{flex:1}.friend-result,.friend-row{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--line)}.friend-result>div:first-child,.friend-row>div:nth-child(2){flex:1}.friend-row .actions{display:flex;gap:8px}.friends-subsection{margin-top:24px}.friends-subsection h3{margin-bottom:8px}.avatar.mini{width:38px;height:38px;min-width:38px;font-size:14px}.friend-row:last-child{border-bottom:0}
+@media(max-width:700px){.friend-search{align-items:stretch}.friend-search button{min-width:90px}.friend-row .actions{flex-wrap:wrap;justify-content:flex-end}.friend-row .actions button{padding:8px 10px}}

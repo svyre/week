@@ -8,18 +8,19 @@
   let state = {
     user:null, profile:null, section:"week", person:"me",
     weekStart: startOfWeek(new Date()), currentDate: new Date(), tasks:[], requests:[], sentRequests:[], templates:[], timeLogs:[], activeTimer:null,
+    friends:[], friendRequests:[], sentFriendRequests:[],
     demo: !hasSupabase, authMode:"login"
   };
 
   const demoData = {
     profiles:[
-      {id:"demo-vadim",display_name:"Вадим",email:"vadim@demo"},
-      {id:"demo-sonya",display_name:"Соня",email:"sonya@demo"}
+      {id:"demo-vadim",display_name:"Вадим",username:"vadim",email:"vadim@demo"},
+      {id:"demo-sonya",display_name:"Соня",username:"sonya",email:"sonya@demo"}
     ],
     tasks:[], requests:[], templates:[
       {id:"t1",title:"Сделать домашку",category:"Школа",duration:60,priority:"mandatory"},
       {id:"t2",title:"Подготовка к репетитору",category:"Репетитор",duration:45,priority:"desirable"}
-    ], timeLogs:[]
+    ], timeLogs:[], friendships:[{user_a:"demo-vadim",user_b:"demo-sonya"}], friendRequests:[]
   };
 
   function uid(){return crypto.randomUUID ? crypto.randomUUID() : Date.now()+"-"+Math.random();}
@@ -80,12 +81,12 @@
   }
 
   function currentUserId(){return state.user?.id || "demo-vadim";}
-  function otherId(){return currentUserId()==="demo-sonya"?"demo-vadim":"demo-sonya"}
-  async function getOtherUser(){
-    if(state.demo)return demoData.profiles.find(p=>p.id!==currentUserId())||null;
-    const {data,error}=await sb.from("profiles").select("id,display_name,email").neq("id",currentUserId()).order("created_at",{ascending:true}).limit(1).maybeSingle();
-    if(error){toast(error.message);return null}
-    return data||null;
+  function normalizeUsername(v=""){return v.trim().replace(/^@/,'').toLowerCase().replace(/[^a-z0-9_а-яё-]/gi,'').slice(0,24)}
+  function friendById(id){return state.friends.find(f=>f.id===id)||null}
+  function fillFriendPicker(selected=""){
+    const el=$("taskFriend"); if(!el)return;
+    if(!state.friends.length){el.innerHTML='<option value="">Сначала добавь друга</option>';return}
+    el.innerHTML=state.friends.map(f=>`<option value="${f.id}" ${f.id===selected?'selected':''}>${esc(f.display_name)}${f.username?` · @${esc(f.username)}`:""}</option>`).join("");
   }
 
   function restoreActiveTimer(){
@@ -256,9 +257,15 @@
     const raw=localStorage.getItem("week-demo");
     if(raw){try{Object.assign(demoData,JSON.parse(raw))}catch{}}
     state.tasks=demoData.tasks.filter(t=>t.owner_id===currentUserId()||t.visibility==="shared");
-    state.requests=demoData.requests.filter(r=>r.to_user_id===currentUserId());
+    state.requests=demoData.requests.filter(r=>r.to_user_id===currentUserId()&&r.status!=="rejected");
+    state.sentRequests=demoData.requests.filter(r=>r.from_user_id===currentUserId());
     state.templates=demoData.templates;
     state.timeLogs=(demoData.timeLogs||[]).filter(l=>l.user_id===currentUserId());
+    const friendIds=(demoData.friendships||[]).filter(x=>x.user_a===currentUserId()||x.user_b===currentUserId()).map(x=>x.user_a===currentUserId()?x.user_b:x.user_a);
+    state.friends=demoData.profiles.filter(p=>friendIds.includes(p.id));
+    state.friendRequests=(demoData.friendRequests||[]).filter(r=>r.to_user_id===currentUserId()&&r.status==="pending");
+    state.sentFriendRequests=(demoData.friendRequests||[]).filter(r=>r.from_user_id===currentUserId()&&r.status==="pending");
+    state.__profiles=demoData.profiles;
     restoreActiveTimer();
     scheduleNotifications();
   }
@@ -293,21 +300,29 @@
   async function reloadCloud(){
     if(state.demo){loadDemo();return}
     const cutoff=new Date();cutoff.setDate(cutoff.getDate()-60);
-    const [{data:tasks,error:tasksErr},{data:requests,error:reqErr},{data:sentRequests,error:sentReqErr},{data:templates,error:tplErr},{data:logs,error:logsErr}]=await Promise.all([
+    const [{data:tasks,error:tasksErr},{data:requests,error:reqErr},{data:sentRequests,error:sentReqErr},{data:templates,error:tplErr},{data:logs,error:logsErr},{data:friendRows,error:friendsErr},{data:friendRequests,error:friendReqErr},{data:sentFriendRequests,error:sentFriendReqErr}]=await Promise.all([
       sb.from("tasks").select("*").order("date").order("start_time"),
       sb.from("task_requests").select("*").eq("to_user_id",state.user.id).eq("status","pending").order("created_at",{ascending:false}),
       sb.from("task_requests").select("*").eq("from_user_id",state.user.id).order("created_at",{ascending:false}).limit(50),
       sb.from("task_templates").select("*").eq("user_id",state.user.id).order("created_at",{ascending:false}),
-      sb.from("time_logs").select("*").eq("user_id",state.user.id).gte("started_at",cutoff.toISOString()).order("started_at",{ascending:false})
+      sb.from("time_logs").select("*").eq("user_id",state.user.id).gte("started_at",cutoff.toISOString()).order("started_at",{ascending:false}),
+      sb.from("friendships").select("user_a,user_b").or(`user_a.eq.${state.user.id},user_b.eq.${state.user.id}`),
+      sb.from("friend_requests").select("id,from_user_id,to_user_id,status,created_at").eq("to_user_id",state.user.id).eq("status","pending").order("created_at",{ascending:false}),
+      sb.from("friend_requests").select("id,from_user_id,to_user_id,status,created_at").eq("from_user_id",state.user.id).eq("status","pending").order("created_at",{ascending:false})
     ]);
-    if(tasksErr||reqErr||sentReqErr||tplErr||logsErr){
-      console.error("reloadCloud error",{tasksErr,reqErr,sentReqErr,tplErr,logsErr});
-      toast(`Ошибка загрузки: ${(tasksErr||reqErr||sentReqErr||tplErr||logsErr).message}`);
-    }
+    const friendIds=(friendRows||[]).map(r=>r.user_a===state.user.id?r.user_b:r.user_a);
+    const requesterIds=(friendRequests||[]).map(r=>r.from_user_id);
+    const profileIds=[...new Set([...friendIds,...requesterIds])];
+    const {data:friendProfiles}=profileIds.length?await sb.from("profiles").select("id,display_name,username").in("id",profileIds):{data:[]};
+    const allErr=tasksErr||reqErr||sentReqErr||tplErr||logsErr||friendsErr||friendReqErr||sentFriendReqErr;
+    if(allErr){console.error("reloadCloud error",allErr);toast(`Ошибка загрузки: ${allErr.message}`)}
     state.tasks=tasks||[];state.requests=requests||[];state.sentRequests=sentRequests||[];state.templates=templates||[];state.timeLogs=logs||[];
-    restoreActiveTimer();
-    scheduleNotifications();
+    state.friends=(friendProfiles||[]).filter(p=>friendIds.includes(p.id));
+    state.__profiles=friendProfiles||[];
+    state.friendRequests=friendRequests||[];state.sentFriendRequests=sentFriendRequests||[];
+    restoreActiveTimer();scheduleNotifications();
     $("requestBadge").textContent=state.requests.length;$("requestBadge").classList.toggle("hidden",!state.requests.length);
+    if($("friendBadge")){ $("friendBadge").textContent=state.friendRequests.length;$("friendBadge").classList.toggle("hidden",!state.friendRequests.length); }
   }
 
   function setupRealtimeNotifications(){
@@ -332,7 +347,7 @@
     $("demoBtn").onclick=()=>{state.demo=true;state.user=demoData.profiles[0];state.profile=state.user;loadDemo();showApp();toast("Открыт демо-режим")};
     $("logoutBtn").onclick=logout;
     qsa(".nav-btn").forEach(b=>b.onclick=()=>switchSection(b.dataset.section));
-    qsa("[data-person]").forEach(b=>b.onclick=()=>{state.person=b.dataset.person;qsa("[data-person]").forEach(x=>x.classList.toggle("active",x===b));renderWeek()});
+    $("friendSearchForm").onsubmit=searchFriend;
     $("prevWeek").onclick=()=>moveDay(-1);
     $("nextWeek").onclick=()=>moveDay(1);
     $("todayBtn").onclick=()=>goToday();
@@ -343,7 +358,7 @@
     $("addTaskBtn").onclick=()=>openTask();
     $("addTemplateBtn").onclick=()=>$("templateModal").classList.remove("hidden");
     $("taskRecurring").onchange=e=>$("recurrenceBox").classList.toggle("hidden",!e.target.checked);
-    qsa('input[name="destination"]').forEach(r=>r.onchange=()=>$("proposalHint").classList.toggle("hidden",r.value!=="proposal"));
+    qsa('input[name="destination"]').forEach(r=>r.onchange=()=>updateDestinationUI());
     qsa("[data-close]").forEach(b=>b.onclick=()=>$(b.dataset.close).classList.add("hidden"));
     $("taskForm").onsubmit=saveTask;
     $("templateForm").onsubmit=saveTemplate;
@@ -362,7 +377,7 @@
     e.preventDefault();
     const email=$("email").value.trim(),password=$("password").value,displayName=$("displayName").value.trim();
     if(state.authMode==="signup"){
-      const {data,error}=await sb.auth.signUp({email,password,options:{data:{display_name:displayName||email.split("@")[0]}}});
+      const {data,error}=await sb.auth.signUp({email,password,options:{data:{display_name:displayName||email.split("@")[0],username:normalizeUsername(displayName||email.split("@")[0])}}});
       if(error){toast(error.message);return}
       toast(data.session?"Аккаунт создан":"Проверь почту для подтверждения");
     }else{
@@ -375,24 +390,22 @@
   function switchSection(s){
     state.section=s;
     qsa(".nav-btn").forEach(b=>b.classList.toggle("active",b.dataset.section===s));
-    ["week","requests","templates","stats","settings"].forEach(x=>$(`${x}Section`).classList.toggle("hidden",x!==s));
-    if(s==="week")renderWeek();else $("sectionTitle").textContent={requests:"Предложения",templates:"Частые задачи",stats:"Статистика",settings:"Настройки"}[s];
-    if(s==="requests")renderRequests();if(s==="templates")renderTemplates();if(s==="stats")renderStats();if(s==="settings")renderSettings();
+    ["week","requests","friends","templates","stats","settings"].forEach(x=>$(`${x}Section`).classList.toggle("hidden",x!==s));
+    if(s==="week")renderWeek();else $("sectionTitle").textContent={requests:"Предложения",friends:"Друзья",templates:"Частые задачи",stats:"Статистика",settings:"Настройки"}[s];
+    if(s==="requests")renderRequests();if(s==="friends")renderFriends();if(s==="templates")renderTemplates();if(s==="stats")renderStats();if(s==="settings")renderSettings();
   }
 
   function renderAll(){
     $("profileName").textContent=state.profile?.display_name||"Пользователь";
     $("profileEmail").textContent=state.profile?.email||state.user?.email||"";
     $("avatar").textContent=(state.profile?.display_name||"П").slice(0,1).toUpperCase();
-    renderWeek();renderRequests();renderTemplates();renderStats();renderSettings();updateTimerBar();
+    renderWeek();renderRequests();renderFriends();renderTemplates();renderStats();renderSettings();updateTimerBar();
   }
 
   function visibleTasks(){
-    let tasks=state.tasks.filter(t=>t.status!=="archived");
-    if(state.person==="me")tasks=tasks.filter(t=>t.owner_id===currentUserId()&&t.visibility!=="shared");
-    if(state.person==="shared")tasks=tasks.filter(t=>t.visibility==="shared");
-    if(state.person==="other")tasks=[];
-    return tasks;
+    // Один календарь: личные задачи текущего пользователя + общие задачи.
+    // Личные задачи других пользователей Supabase не отдаёт из-за RLS.
+    return state.tasks.filter(t=>t.status!=="archived");
   }
 
   function selectedDate(){return new Date(state.currentDate.getFullYear(),state.currentDate.getMonth(),state.currentDate.getDate())}
@@ -501,7 +514,8 @@
     $("recurrenceBox").classList.toggle("hidden",!task?.recurrence);
     $("taskRecurrence").value=task?.recurrence||"weekly";
     qsa('input[name="destination"]').forEach(r=>r.checked=r.value===(task?.visibility==="shared"?"shared":"private"));
-    $("proposalHint").classList.add("hidden");
+    fillFriendPicker(task?.friend_id||state.friends[0]?.id||"");
+    updateDestinationUI();
     $("taskModal").classList.remove("hidden");
   }
 
@@ -520,8 +534,8 @@
     localStorage.setItem("week-default-duration", String(base.duration));
     if(state.demo){
       if(id){const t=demoData.tasks.find(x=>x.id===id);if(t)Object.assign(t,base)}
-      else if(dest==="proposal"){demoData.requests.push({id:uid(),from_user_id:currentUserId(),to_user_id:otherId(),title:base.title,description:base.description,date:base.date,start_time:base.start_time,duration:base.duration,category:base.category,priority:base.priority,status:"pending",created_at:new Date().toISOString()})}
-      else demoData.tasks.push({id:uid(),owner_id:currentUserId(),visibility:dest==="shared"?"shared":"private",status:"open",...base});
+      else if(dest==="proposal"){const friendId=$("taskFriend").value||state.friends[0]?.id||otherId();demoData.requests.push({id:uid(),from_user_id:currentUserId(),to_user_id:friendId,title:base.title,description:base.description,date:base.date,start_time:base.start_time,duration:base.duration,category:base.category,priority:base.priority,status:"pending",created_at:new Date().toISOString()})}
+      else {const friendId=$("taskFriend").value||state.friends[0]?.id;demoData.tasks.push({id:uid(),owner_id:currentUserId(),visibility:dest==="shared"?"shared":"private",friend_id:friendId,status:"open",...base});}
       saveDemo();loadDemo();
     }else{
       if(id){
@@ -529,20 +543,26 @@
         if(error){toast(error.message);return}
       }
       else if(dest==="proposal"){
-        const other=await getOtherUser();
-        if(!other){toast("Второй пользователь ещё не зарегистрирован");return}
-        const {error}=await sb.from("task_requests").insert({...base,from_user_id:state.user.id,to_user_id:other.id,status:"pending"});
+        const friendId=$("taskFriend").value;
+        if(!friendId){toast("Сначала выбери друга");return}
+        const {error}=await sb.from("task_requests").insert({...base,from_user_id:state.user.id,to_user_id:friendId,status:"pending"});
         if(error){toast(error.message);return}
       }else{
-        const {error}=await sb.from("tasks").insert({...base,owner_id:state.user.id,visibility:dest==="shared"?"shared":"private",status:"open"});
+        const payload={...base,owner_id:state.user.id,visibility:dest==="shared"?"shared":"private",status:"open"};
+        const {data:newTask,error}=await sb.from("tasks").insert(payload).select().single();
         if(error){toast(error.message);return}
+        if(dest==="shared"){
+          const friendId=$("taskFriend").value;
+          if(!friendId){await sb.from("tasks").delete().eq("id",newTask.id).eq("owner_id",state.user.id);toast("Сначала выбери друга для общей задачи");return}
+          const {error:memberError}=await sb.from("task_members").insert([{task_id:newTask.id,user_id:state.user.id},{task_id:newTask.id,user_id:friendId}]);
+          if(memberError){await sb.from("tasks").delete().eq("id",newTask.id).eq("owner_id",state.user.id);toast(memberError.message);return}
+        }
       }
       await reloadCloud();
     }
     if(dest!=="proposal"){
-      state.person=dest==="shared"?"shared":"me";
-      qsa("[data-person]").forEach(x=>x.classList.toggle("active",x.dataset.person===state.person));
-      state.currentDate=new Date(base.date+"T00:00:00"); state.weekStart=startOfWeek(state.currentDate);
+      state.currentDate=new Date(base.date+"T00:00:00");
+      state.weekStart=startOfWeek(state.currentDate);
     }
     $("taskModal").classList.add("hidden");renderAll();toast(id?"Задача обновлена":dest==="proposal"?"Предложение отправлено":"Задача создана");
   }
@@ -578,8 +598,10 @@
       // with the recipient as owner. RLS policies allow the authenticated user
       // to insert rows only for their own owner_id. The shared visibility makes
       // the task visible to both users.
-      const {error:taskError}=await sb.from("tasks").insert({owner_id:state.user.id,visibility:"shared",status:"open",title:r.title,description:r.description,date:r.date,start_time:r.start_time,duration:r.duration,category:r.category,priority:r.priority});
+      const {data:created,error:taskError}=await sb.from("tasks").insert({owner_id:state.user.id,visibility:"shared",status:"open",title:r.title,description:r.description,date:r.date,start_time:r.start_time,duration:r.duration,category:r.category,priority:r.priority}).select().single();
       if(taskError){toast(`Не удалось принять предложение: ${taskError.message}`);return}
+      const {error:memberError}=await sb.from("task_members").insert([{task_id:created.id,user_id:state.user.id},{task_id:created.id,user_id:r.from_user_id}]);
+      if(memberError){await sb.from("tasks").delete().eq("id",created.id).eq("owner_id",state.user.id);toast(`Не удалось связать задачу с друзьями: ${memberError.message}`);return}
       const {error:requestError}=await sb.from("task_requests").update({status:"accepted"}).eq("id",id).eq("to_user_id",state.user.id);
       if(requestError){toast(`Задача создана, но статус предложения не обновился: ${requestError.message}`);await reloadCloud();return}
       await reloadCloud();
@@ -597,8 +619,65 @@
     $("taskId").value="";$("taskTitle").value=r.title;$("taskDescription").value=r.description||"";
     $("taskDate").value=r.date;$("taskTime").value=r.start_time?.slice(0,5)||"";$("taskDuration").value=r.duration||60;
     $("taskCategory").value=r.category||"Другое";$("taskPriority").value=r.priority||"desirable";
-    qs('input[name="destination"][value="proposal"]').checked=true;$("proposalHint").classList.remove("hidden");
+    qs('input[name="destination"][value="proposal"]').checked=true;
+    fillFriendPicker(r.from_user_id);
+    updateDestinationUI();
   };
+
+  function updateDestinationUI(){
+    const dest=qs('input[name="destination"]:checked')?.value||"private";
+    $("friendPickerBox").classList.toggle("hidden",dest==="private");
+    $("proposalHint").classList.toggle("hidden",dest!=="proposal");
+    fillFriendPicker($("taskFriend")?.value||state.friends[0]?.id||"");
+  }
+
+  async function searchFriend(e){
+    e.preventDefault();
+    const username=normalizeUsername($("friendUsername").value);
+    if(!username){$("friendSearchResult").innerHTML='<p class="muted small">Введи username.</p>';return}
+    if(state.demo){
+      const found=demoData.profiles.find(p=>(p.username||p.display_name.toLowerCase())===username && p.id!==currentUserId());
+      $("friendSearchResult").innerHTML=found?`<div class="friend-result"><div><strong>${esc(found.display_name)}</strong><div class="small muted">@${esc(found.username||username)}</div></div><button class="primary" onclick="window.demoAddFriend('${found.id}')">Добавить</button></div>`:'<p class="muted small">Пользователь не найден.</p>';
+      return;
+    }
+    const {data,error}=await sb.from("profiles").select("id,display_name,username").eq("username",username).neq("id",state.user.id).maybeSingle();
+    if(error){toast(error.message);return}
+    if(!data){$("friendSearchResult").innerHTML='<p class="muted small">Пользователь не найден.</p>';return}
+    if(friendById(data.id)){$("friendSearchResult").innerHTML='<p class="muted small">Этот пользователь уже у тебя в друзьях.</p>';return}
+    const already=state.sentFriendRequests.some(r=>r.to_user_id===data.id)||state.friendRequests.some(r=>r.from_user_id===data.id);
+    $("friendSearchResult").innerHTML=already?`<div class="friend-result"><div><strong>${esc(data.display_name)}</strong><div class="small muted">@${esc(data.username||"")}</div></div><span class="small muted">Заявка уже отправлена</span></div>`:`<div class="friend-result"><div><strong>${esc(data.display_name)}</strong><div class="small muted">@${esc(data.username||"")}</div></div><button class="primary" onclick="window.sendFriendRequest('${data.id}')">Добавить</button></div>`;
+  }
+
+  window.sendFriendRequest=async id=>{
+    if(state.demo){window.demoAddFriend(id);return}
+    const {error}=await sb.from("friend_requests").insert({from_user_id:state.user.id,to_user_id:id,status:"pending"});
+    if(error){toast(error.message);return}
+    await reloadCloud();renderFriends();toast("Заявка отправлена");
+  };
+  window.demoAddFriend=id=>{
+    if(!demoData.friendships)demoData.friendships=[];
+    if(!demoData.friendships.some(x=>(x.user_a===currentUserId()&&x.user_b===id)||(x.user_a===id&&x.user_b===currentUserId())))demoData.friendships.push({user_a:currentUserId(),user_b:id});
+    saveDemo();loadDemo();renderFriends();updateDestinationUI();toast("Друг добавлен");
+  };
+  window.acceptFriend=async id=>{
+    const r=state.friendRequests.find(x=>x.id===id);if(!r)return;
+    if(state.demo){window.demoAddFriend(r.from_user_id);demoData.friendRequests=(demoData.friendRequests||[]).filter(x=>x.id!==id);saveDemo();loadDemo()}
+    else{const {error}=await sb.from("friend_requests").update({status:"accepted"}).eq("id",id).eq("to_user_id",state.user.id);if(error){toast(error.message);return}await reloadCloud()}
+    renderFriends();toast("Заявка принята");
+  };
+  window.rejectFriend=async id=>{
+    const r=state.friendRequests.find(x=>x.id===id);if(!r)return;
+    if(state.demo){demoData.friendRequests=(demoData.friendRequests||[]).filter(x=>x.id!==id);saveDemo();loadDemo()}
+    else{const {error}=await sb.from("friend_requests").update({status:"rejected"}).eq("id",id).eq("to_user_id",state.user.id);if(error){toast(error.message);return}await reloadCloud()}
+    renderFriends();toast("Заявка отклонена");
+  };
+  function renderFriends(){
+    const list=$("friendsList"), req=$("friendRequestsList");
+    list.innerHTML=state.friends.length?state.friends.map(f=>`<div class="friend-row"><div class="avatar mini">${esc((f.display_name||"П").slice(0,1).toUpperCase())}</div><div><strong>${esc(f.display_name)}</strong><div class="small muted">@${esc(f.username||"")}</div></div></div>`).join(""):'<p class="muted small">Пока нет друзей.</p>';
+    req.innerHTML=state.friendRequests.length?state.friendRequests.map(r=>{const f=(state.__profiles||[]).find(x=>x.id===r.from_user_id);return `<div class="friend-row"><div><strong>${esc(f?.display_name||"Новый друг")}</strong></div><div class="actions"><button class="primary" onclick="window.acceptFriend('${r.id}')">Принять</button><button class="secondary" onclick="window.rejectFriend('${r.id}')">Отклонить</button></div></div>`}).join(""):'<p class="muted small">Новых заявок нет.</p>';
+    $("friendBadge").textContent=state.friendRequests.length;$("friendBadge").classList.toggle("hidden",!state.friendRequests.length);
+    fillFriendPicker($("taskFriend")?.value||state.friends[0]?.id||"");
+  }
 
   function renderTemplates(){
     $("templatesList").innerHTML=state.templates.length?state.templates.map(t=>`<div class="template"><strong>${esc(t.title)}</strong><div class="task-meta">${esc(t.category)} • ${t.duration} мин • ${priorityLabel(t.priority)}</div><button class="secondary" style="margin-top:12px" onclick="window.useTemplate('${t.id}')">Добавить в неделю</button></div>`).join(""):"<p class='muted'>Шаблонов пока нет.</p>";
@@ -633,6 +712,7 @@
 
   function renderSettings(){
     $("settingsName").value=state.profile?.display_name||"";
+    $("settingsUsername").value=state.profile?.username||"";
     $("defaultDuration").value=localStorage.getItem("week-default-duration")||60;
     if($("themeSelect"))$("themeSelect").value=localStorage.getItem("week-theme")||APP_CFG.theme||"system";
     const ns=notificationSettings();
@@ -640,10 +720,12 @@
   }
   async function saveSettings(){
     const name=$("settingsName").value.trim()||"Пользователь";
+    const username=normalizeUsername($("settingsUsername").value);
+    if(!username){toast("Укажи username");return}
     localStorage.setItem("week-default-duration", String(Number($("defaultDuration").value)||60));
     saveNotificationSettings();
     await syncPushSubscription();
-    if(state.demo){state.profile.display_name=name;demoData.profiles[0].display_name=name;saveDemo()}else{await sb.from("profiles").update({display_name:name}).eq("id",state.user.id);state.profile.display_name=name}
+    if(state.demo){state.profile.display_name=name;state.profile.username=username;demoData.profiles[0].display_name=name;demoData.profiles[0].username=username;saveDemo()}else{const {error}=await sb.from("profiles").update({display_name:name,username}).eq("id",state.user.id);if(error){toast(error.message);return}state.profile.display_name=name;state.profile.username=username}
     renderAll();toast("Настройки сохранены");
   }
   function exportData(){

@@ -18,7 +18,7 @@
   <div id="authView" class="auth-screen">
     <div class="auth-card">
       <div class="logo">week<span>.</span></div>
-      <p class="muted">Планировщик для Вадима и Сони</p>
+      <p class="muted">Планировщик для тебя и твоих друзей</p>
       <div class="tabs auth-tabs">
         <button class="tab active" data-auth="login">Войти</button>
         <button class="tab" data-auth="signup">Регистрация</button>
@@ -26,7 +26,7 @@
       <form id="authForm">
         <label>Email<input id="email" type="email" required placeholder="you@example.com"></label>
         <label>Пароль<input id="password" type="password" minlength="6" required placeholder="••••••••"></label>
-        <label id="nameField" class="hidden">Имя<input id="displayName" placeholder="Вадим или Соня"></label>
+        <label id="nameField" class="hidden">Имя<input id="displayName" placeholder="Например, Вадим"></label>
         <button class="primary full" type="submit" id="authSubmit">Войти</button>
       </form>
       <p id="authHint" class="small muted">После регистрации проверь почту, если включено подтверждение email.</p>
@@ -43,6 +43,7 @@
       <nav>
         <button class="nav-btn active" data-section="week"><span>⌂</span><span>Сегодня</span></button>
         <button class="nav-btn" data-section="requests"><span>♡</span><span>Предложения</span><span id="requestBadge" class="badge hidden">0</span></button>
+        <button class="nav-btn" data-section="friends"><span>♧</span><span>Друзья</span><span id="friendBadge" class="badge hidden">0</span></button>
         <button class="nav-btn" data-section="templates"><span>✦</span><span>Шаблоны</span></button>
         <button class="nav-btn" data-section="stats"><span>↗</span><span>Статистика</span></button>
         <button class="nav-btn" data-section="settings"><span>⚙</span><span>Настройки</span></button>
@@ -71,10 +72,6 @@
       </div>
 
       <section id="weekSection" class="section">
-        <div class="person-tabs tabs">
-          <button class="tab active" data-person="me">Мои</button>
-          <button class="tab" data-person="shared">Общие</button>
-        </div>
         <div class="week-controls">
           <button id="prevWeek" class="icon-btn" aria-label="Предыдущий день">←</button>
           <button id="todayBtn" class="secondary today-chip">Сегодня</button>
@@ -92,6 +89,19 @@
         <div class="panel">
           <div class="panel-head"><h2>Предложения задач</h2><span class="muted small">Принять или отклонить</span></div>
           <div id="requestsList"></div>
+        </div>
+      </section>
+
+      <section id="friendsSection" class="section hidden">
+        <div class="panel">
+          <div class="panel-head"><div><h2>Друзья</h2><p class="small muted">Добавляй людей и планируйте задачи вместе.</p></div></div>
+          <form id="friendSearchForm" class="friend-search">
+            <input id="friendUsername" placeholder="username, например @sonya" autocomplete="off">
+            <button class="primary" type="submit">Найти</button>
+          </form>
+          <div id="friendSearchResult"></div>
+          <div class="friends-subsection"><h3>Мои друзья</h3><div id="friendsList"></div></div>
+          <div class="friends-subsection"><h3>Заявки</h3><div id="friendRequestsList"></div></div>
         </div>
       </section>
 
@@ -115,6 +125,7 @@
         <div class="panel settings-panel">
           <h2>Настройки</h2>
           <label>Имя<input id="settingsName"></label>
+          <label>Username<input id="settingsUsername" placeholder="например vadim" maxlength="24"><span class="small muted">По нему тебя смогут найти друзья.</span></label>
           <div class="settings-card appearance-card">
             <div><strong>Внешний вид</strong><p class="small muted">Можно использовать тему устройства или выбрать светлую/тёмную.</p></div>
             <label>Тема<select id="themeSelect"><option value="system">Как на устройстве</option><option value="light">Светлая</option><option value="dark">Тёмная</option></select></label>
@@ -164,13 +175,16 @@
           <label>Повторение<select id="taskRecurrence"><option value="daily">Каждый день</option><option value="weekly">Каждую неделю</option><option value="weekdays">Пн–Пт</option></select></label>
         </div>
         <div class="destination-box">
-          <strong>Кому</strong>
+          <strong>Видимость</strong>
           <div class="radio-row">
-            <label><input type="radio" name="destination" value="private" checked> Мне</label>
-            <label><input type="radio" name="destination" value="shared"> Общая</label>
-            <label><input type="radio" name="destination" value="proposal"> Предложить другому</label>
+            <label><input type="radio" name="destination" value="private" checked> Только мне</label>
+            <label><input type="radio" name="destination" value="shared"> Общая с другом</label>
+            <label><input type="radio" name="destination" value="proposal"> Предложить другу</label>
           </div>
-          <p id="proposalHint" class="small muted hidden">После создания задача попадёт другому пользователю на рассмотрение.</p>
+          <div id="friendPickerBox" class="hidden">
+            <label>Друг<select id="taskFriend"></select></label>
+          </div>
+          <p id="proposalHint" class="small muted hidden">После создания задача попадёт выбранному другу на рассмотрение.</p>
         </div>
         <div class="modal-actions"><button type="button" class="secondary" data-close="taskModal">Отмена</button><button class="primary" type="submit">Сохранить</button></div>
       </form>

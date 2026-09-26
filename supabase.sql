@@ -132,11 +132,12 @@ language plpgsql
 security definer set search_path = public
 as $$
 begin
-  insert into public.profiles (id, display_name, email)
+  insert into public.profiles (id, display_name, email, username)
   values (
     new.id,
     coalesce(new.raw_user_meta_data->>'display_name', split_part(new.email,'@',1)),
-    new.email
+    new.email,
+    lower(regexp_replace(coalesce(new.raw_user_meta_data->>'username', split_part(new.email,'@',1)) || '_' || substr(new.id::text,1,6), '[^a-zA-Z0-9_а-яА-ЯёЁ-]', '', 'g'))
   )
   on conflict (id) do nothing;
   return new;
@@ -308,3 +309,221 @@ do $$ begin
   alter publication supabase_realtime add table public.notification_events;
 exception when duplicate_object then null;
 end $$;
+
+-- ============================================================
+-- Friends / multi-user support
+-- ============================================================
+alter table public.profiles add column if not exists username text;
+
+-- Give existing accounts a stable username before adding uniqueness.
+update public.profiles
+set username = lower(regexp_replace(coalesce(nullif(display_name,''),'user') || '_' || substr(id::text,1,6), '[^a-zA-Z0-9_а-яА-ЯёЁ-]', '', 'g'))
+where username is null or trim(username)='';
+
+create unique index if not exists profiles_username_unique_idx on public.profiles(username);
+
+create table if not exists public.friend_requests (
+  id uuid primary key default gen_random_uuid(),
+  from_user_id uuid not null references public.profiles(id) on delete cascade,
+  to_user_id uuid not null references public.profiles(id) on delete cascade,
+  status text not null default 'pending' check (status in ('pending','accepted','rejected')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  check (from_user_id <> to_user_id)
+);
+
+create index if not exists friend_requests_to_idx on public.friend_requests(to_user_id,status,created_at desc);
+create index if not exists friend_requests_from_idx on public.friend_requests(from_user_id,status,created_at desc);
+
+create table if not exists public.friendships (
+  user_a uuid not null references public.profiles(id) on delete cascade,
+  user_b uuid not null references public.profiles(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (user_a,user_b),
+  check (user_a < user_b)
+);
+
+create table if not exists public.task_members (
+  task_id uuid not null references public.tasks(id) on delete cascade,
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (task_id,user_id)
+);
+create index if not exists task_members_user_idx on public.task_members(user_id,task_id);
+
+alter table public.friend_requests enable row level security;
+alter table public.friendships enable row level security;
+alter table public.task_members enable row level security;
+
+-- Profiles are searchable by username. The client only asks for public columns.
+drop policy if exists "profiles_select_authenticated" on public.profiles;
+create policy "profiles_select_authenticated" on public.profiles for select using (auth.uid() is not null);
+
+-- Friend requests
+drop policy if exists "friend_requests_select" on public.friend_requests;
+create policy "friend_requests_select" on public.friend_requests for select using (from_user_id=auth.uid() or to_user_id=auth.uid());
+drop policy if exists "friend_requests_insert" on public.friend_requests;
+create policy "friend_requests_insert" on public.friend_requests for insert with check (from_user_id=auth.uid() and from_user_id<>to_user_id);
+drop policy if exists "friend_requests_update_recipient" on public.friend_requests;
+create policy "friend_requests_update_recipient" on public.friend_requests for update using (to_user_id=auth.uid()) with check (to_user_id=auth.uid());
+
+-- Friendships are read-only from the client; accepted requests create them via trigger.
+drop policy if exists "friendships_select_own" on public.friendships;
+create policy "friendships_select_own" on public.friendships for select using (user_a=auth.uid() or user_b=auth.uid());
+drop policy if exists "friendships_no_client_insert" on public.friendships;
+create policy "friendships_no_client_insert" on public.friendships for insert with check (false);
+drop policy if exists "friendships_no_client_update" on public.friendships;
+create policy "friendships_no_client_update" on public.friendships for update using (false) with check (false);
+drop policy if exists "friendships_no_client_delete" on public.friendships;
+create policy "friendships_no_client_delete" on public.friendships for delete using (false);
+
+-- A task member can only be added by the task owner, and only if the other
+-- person is that owner's friend. This prevents arbitrary cross-account access.
+drop policy if exists "task_members_select_own" on public.task_members;
+create policy "task_members_select_own" on public.task_members for select using (
+  user_id=auth.uid()
+  or exists(select 1 from public.tasks t where t.id=task_id and t.owner_id=auth.uid())
+);
+drop policy if exists "task_members_insert_owner_friend" on public.task_members;
+create policy "task_members_insert_owner_friend" on public.task_members for insert with check (
+  exists(select 1 from public.tasks t where t.id=task_id and t.owner_id=auth.uid())
+  and (
+    user_id=auth.uid()
+    or exists(
+      select 1 from public.friendships f
+      where (f.user_a=least(auth.uid(),user_id) and f.user_b=greatest(auth.uid(),user_id))
+    )
+  )
+);
+drop policy if exists "task_members_delete_owner" on public.task_members;
+create policy "task_members_delete_owner" on public.task_members for delete using (
+  exists(select 1 from public.tasks t where t.id=task_id and t.owner_id=auth.uid())
+);
+
+-- Replace the old two-person task visibility rule.
+drop policy if exists "tasks_select" on public.tasks;
+create policy "tasks_select" on public.tasks for select using (
+  owner_id=auth.uid()
+  or exists(select 1 from public.task_members tm where tm.task_id=tasks.id and tm.user_id=auth.uid())
+);
+drop policy if exists "tasks_update" on public.tasks;
+create policy "tasks_update" on public.tasks for update using (
+  owner_id=auth.uid()
+  or exists(select 1 from public.task_members tm where tm.task_id=tasks.id and tm.user_id=auth.uid())
+);
+
+-- Friend request acceptance creates a canonical friendship and notifies the sender.
+create or replace function public.accept_friend_request()
+returns trigger
+language plpgsql
+security definer
+set search_path=public
+as $$
+begin
+  if OLD.status='accepted' or NEW.status<>'accepted' then return NEW; end if;
+  insert into public.friendships(user_a,user_b)
+  values(least(NEW.from_user_id,NEW.to_user_id),greatest(NEW.from_user_id,NEW.to_user_id))
+  on conflict do nothing;
+  perform public.create_week_notification(
+    NEW.from_user_id,NEW.to_user_id,'friend_accepted','Новый друг',
+    coalesce((select display_name from public.profiles where id=NEW.to_user_id),'Пользователь') || ' принял(а) твою заявку в друзья',
+    jsonb_build_object('friend_request_id',NEW.id)
+  );
+  return NEW;
+end;
+$$;
+drop trigger if exists friend_request_accepted on public.friend_requests;
+create trigger friend_request_accepted
+after update of status on public.friend_requests
+for each row execute function public.accept_friend_request();
+
+create or replace function public.notify_friend_request_created()
+returns trigger
+language plpgsql
+security definer
+set search_path=public
+as $$
+begin
+  perform public.create_week_notification(
+    NEW.to_user_id,NEW.from_user_id,'friend_request_created','Новая заявка в друзья',
+    coalesce((select display_name from public.profiles where id=NEW.from_user_id),'Кто-то') || ' хочет добавить тебя в друзья',
+    jsonb_build_object('friend_request_id',NEW.id)
+  );
+  return NEW;
+end;
+$$;
+drop trigger if exists friend_request_created_notification on public.friend_requests;
+create trigger friend_request_created_notification
+after insert on public.friend_requests
+for each row execute function public.notify_friend_request_created();
+
+-- New shared tasks notify the selected friend.
+create or replace function public.notify_shared_task_created()
+returns trigger
+language plpgsql
+security definer
+set search_path=public
+as $$
+declare member_id uuid; actor_name text;
+begin
+  if NEW.visibility<>'shared' then return NEW; end if;
+  select display_name into actor_name from public.profiles where id=NEW.owner_id;
+  for member_id in select user_id from public.task_members where task_id=NEW.id and user_id<>NEW.owner_id loop
+    perform public.create_week_notification(member_id,NEW.owner_id,'shared_task_created','Новая общая задача',coalesce(actor_name,'Пользователь') || ' добавил общую задачу: ' || NEW.title,jsonb_build_object('task_id',NEW.id));
+  end loop;
+  return NEW;
+end;
+$$;
+drop trigger if exists shared_task_created_notification on public.tasks;
+create trigger shared_task_created_notification
+after insert on public.tasks
+for each row execute function public.notify_shared_task_created();
+
+-- Existing shared tasks become private-to-owner until they are explicitly shared with a friend.
+insert into public.task_members(task_id,user_id)
+select id,owner_id from public.tasks where visibility='shared'
+on conflict do nothing;
+
+-- RLS helpers avoid recursive policies when tasks and task_members reference each other.
+create or replace function public.is_task_member(p_task uuid,p_user uuid)
+returns boolean language sql stable security definer set search_path=public as $$
+  select exists(select 1 from public.task_members where task_id=p_task and user_id=p_user);
+$$;
+create or replace function public.is_task_owner(p_task uuid,p_user uuid)
+returns boolean language sql stable security definer set search_path=public as $$
+  select exists(select 1 from public.tasks where id=p_task and owner_id=p_user);
+$$;
+
+drop policy if exists "task_members_select_own" on public.task_members;
+create policy "task_members_select_own" on public.task_members for select using (
+  user_id=auth.uid() or public.is_task_owner(task_id,auth.uid())
+);
+drop policy if exists "task_members_insert_owner_friend" on public.task_members;
+create policy "task_members_insert_owner_friend" on public.task_members for insert with check (
+  public.is_task_owner(task_id,auth.uid())
+  and (
+    user_id=auth.uid()
+    or exists(select 1 from public.friendships f where f.user_a=least(auth.uid(),user_id) and f.user_b=greatest(auth.uid(),user_id))
+  )
+);
+drop policy if exists "task_members_delete_owner" on public.task_members;
+create policy "task_members_delete_owner" on public.task_members for delete using (public.is_task_owner(task_id,auth.uid()));
+
+drop policy if exists "tasks_select" on public.tasks;
+create policy "tasks_select" on public.tasks for select using (owner_id=auth.uid() or public.is_task_member(id,auth.uid()));
+drop policy if exists "tasks_update" on public.tasks;
+create policy "tasks_update" on public.tasks for update using (owner_id=auth.uid() or public.is_task_member(id,auth.uid()));
+
+create or replace function public.notify_task_member_added()
+returns trigger language plpgsql security definer set search_path=public as $$
+declare owner_id uuid; owner_name text; task_title text; task_visibility text;
+begin
+  select t.owner_id,t.title,t.visibility into owner_id,task_title,task_visibility from public.tasks t where t.id=NEW.task_id;
+  if task_visibility<>'shared' or owner_id is null or NEW.user_id=owner_id then return NEW; end if;
+  select display_name into owner_name from public.profiles where id=owner_id;
+  perform public.create_week_notification(NEW.user_id,owner_id,'shared_task_created','Новая общая задача',coalesce(owner_name,'Пользователь') || ' добавил общую задачу: ' || task_title,jsonb_build_object('task_id',NEW.task_id));
+  return NEW;
+end;
+$$;
+drop trigger if exists shared_task_member_added_notification on public.task_members;
+create trigger shared_task_member_added_notification after insert on public.task_members for each row execute function public.notify_task_member_added();
