@@ -123,6 +123,7 @@
             <span><i class="dot high"></i> загружено</span>
           </div>
         </div>
+        <div id="timelineMoveHint" class="timeline-move-hint hidden" role="status">Выбери пустой промежуток для переноса задачи <button type="button" id="cancelTimelineMove" class="secondary">Отмена</button></div>
         <div id="weekGrid" class="week-grid"></div>
       </section>
 
@@ -159,8 +160,14 @@
 
       <section id="statsSection" class="section hidden">
         <div id="statsCards" class="stats-grid"></div>
-        <div class="panel"><h2>Нагрузка по дням</h2><div id="statsBars" class="stats-bars"></div></div>
-        <div class="panel"><h2>По категориям</h2><div id="categoryStats"></div></div>
+        <div class="stats-feature-grid">
+          <div class="panel stats-feature"><h2>Выполнение задач</h2><div id="statsProgress"></div></div>
+          <div class="panel stats-feature"><h2>Серия выполнений</h2><div id="statsStreak"></div></div>
+        </div>
+        <div class="panel"><div class="stats-panel-header"><h2>Нагрузка по дням</h2><p class="small muted">Суммарное время, включая пересечения</p></div>
+          <div class="stats-legend"><span><i class="stats-legend-dot stats-legend-tasks"></i>Задачи</span><span><i class="stats-legend-dot stats-legend-school"></i>Школа</span><span><i class="stats-legend-dot stats-legend-extra"></i>Доп. занятия</span></div>
+          <div id="statsBars" class="stats-bars"></div></div>
+        <div class="panel"><h2>По категориям и занятиям</h2><div id="categoryStats"></div></div>
       </section>
 
       <section id="profileSection" class="section hidden">

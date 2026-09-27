@@ -8,7 +8,7 @@
   let state = {
     user:null, profile:null, section:"week", person:"me",
     weekStart: startOfWeek(new Date()), currentDate: new Date(), calendarView:localStorage.getItem("week-calendar-view")==="week"?"week":"day", tasks:[], requests:[], sentRequests:[], templates:[], timeLogs:[], activeTimer:null,
-    friends:[], friendRequests:[], sentFriendRequests:[], schedule:[],
+    friends:[], friendRequests:[], sentFriendRequests:[], schedule:[], completionDays:[], movingTaskId:null, draggedTaskId:null,
     demo: !hasSupabase, authMode:"login", onboardingStep:1, sendingFriendIds:new Set()
   };
 
@@ -20,7 +20,7 @@
     tasks:[], requests:[], templates:[
       {id:"t1",title:"Сделать домашку",category:"Школа",duration:60,priority:"mandatory"},
       {id:"t2",title:"Подготовка к репетитору",category:"Репетитор",duration:45,priority:"desirable"}
-    ], timeLogs:[], schedules:[], friendships:[{user_a:"demo-vadim",user_b:"demo-sonya"}], friendRequests:[]
+    ], timeLogs:[], schedules:[], completionDays:[], friendships:[{user_a:"demo-vadim",user_b:"demo-sonya"}], friendRequests:[]
   };
 
   function uid(){return crypto.randomUUID ? crypto.randomUUID() : Date.now()+"-"+Math.random();}
@@ -171,6 +171,21 @@
     $("taskConflictList").innerHTML=found.slice(0,4).map(c=>
       `<li><strong>${fmtDate(c.date)}</strong>, ${esc(c.time)} — ${esc(c.title)}${c.kind==="schedule"?" (занятие)":""}</li>`).join("");
     $("taskConflictExtra").textContent=found.length>4?"Показаны первые четыре совпадения.":"";
+  }
+
+  // One lightweight entry per user and calendar day, regardless of task count.
+  // This is a completion-activity streak, not a count of planned lessons.
+  async function recordCompletionDay(){
+    const day=iso(new Date());
+    if(state.demo){
+      demoData.completionDays ||= [];
+      if(!demoData.completionDays.some(x=>x.user_id===currentUserId()&&x.day===day))
+        demoData.completionDays.push({user_id:currentUserId(),day});
+      saveDemo();loadDemo();return;
+    }
+    const {error}=await sb.from("task_completion_days").upsert({user_id:state.user.id,day},{onConflict:"user_id,day",ignoreDuplicates:true});
+    if(error){console.warn("Streak save failed:",error);toast("Задача выполнена, но серия не записана. Проверь MIGRATION_2_0.sql");return}
+    if(!state.completionDays.includes(day))state.completionDays.push(day);
   }
 
   function trackedMinutesFor(taskId){
@@ -365,6 +380,7 @@
     state.friendRequests=(demoData.friendRequests||[]).filter(r=>r.to_user_id===currentUserId()&&r.status==="pending");
     state.sentFriendRequests=(demoData.friendRequests||[]).filter(r=>r.from_user_id===currentUserId()&&r.status==="pending");
     state.schedule=(demoData.schedules||[]).filter(r=>r.user_id===currentUserId());
+    state.completionDays=(demoData.completionDays||[]).filter(x=>x.user_id===currentUserId()).map(x=>x.day);
     state.__profiles=demoData.profiles;
     restoreActiveTimer();
     scheduleNotifications();
@@ -401,7 +417,7 @@
   async function reloadCloud(){
     if(state.demo){loadDemo();return}
     const cutoff=new Date();cutoff.setDate(cutoff.getDate()-60);
-    const [{data:tasks,error:tasksErr},{data:requests,error:reqErr},{data:sentRequests,error:sentReqErr},{data:templates,error:tplErr},{data:logs,error:logsErr},{data:friendRows,error:friendsErr},{data:friendRequests,error:friendReqErr},{data:sentFriendRequests,error:sentFriendReqErr},{data:schedule,error:scheduleErr}]=await Promise.all([
+    const [{data:tasks,error:tasksErr},{data:requests,error:reqErr},{data:sentRequests,error:sentReqErr},{data:templates,error:tplErr},{data:logs,error:logsErr},{data:friendRows,error:friendsErr},{data:friendRequests,error:friendReqErr},{data:sentFriendRequests,error:sentFriendReqErr},{data:schedule,error:scheduleErr},{data:completionRows,error:completionErr}]=await Promise.all([
       sb.from("tasks").select("*").order("date").order("start_time"),
       sb.from("task_requests").select("*").eq("to_user_id",state.user.id).eq("status","pending").order("created_at",{ascending:false}),
       sb.from("task_requests").select("*").eq("from_user_id",state.user.id).order("created_at",{ascending:false}).limit(50),
@@ -410,18 +426,21 @@
       sb.from("friendships").select("user_a,user_b").or(`user_a.eq.${state.user.id},user_b.eq.${state.user.id}`),
       sb.from("friend_requests").select("id,from_user_id,to_user_id,status,created_at").eq("to_user_id",state.user.id).eq("status","pending").order("created_at",{ascending:false}),
       sb.from("friend_requests").select("id,from_user_id,to_user_id,status,created_at").eq("from_user_id",state.user.id).eq("status","pending").order("created_at",{ascending:false}),
-      sb.from("schedule_items").select("*").eq("user_id",state.user.id).order("day_of_week").order("start_time")
+      sb.from("schedule_items").select("*").eq("user_id",state.user.id).order("day_of_week").order("start_time"),
+      sb.from("task_completion_days").select("day").eq("user_id",state.user.id).order("day",{ascending:false}).limit(500)
     ]);
     const friendIds=(friendRows||[]).map(r=>r.user_a===state.user.id?r.user_b:r.user_a);
     const requesterIds=(friendRequests||[]).map(r=>r.from_user_id);
     const profileIds=[...new Set([...friendIds,...requesterIds])];
     const {data:friendProfiles}=profileIds.length?await sb.from("profiles").select("id,display_name,username").in("id",profileIds):{data:[]};
     const allErr=tasksErr||reqErr||sentReqErr||tplErr||logsErr||friendsErr||friendReqErr||sentFriendReqErr||scheduleErr;
+    if(completionErr)console.warn("Для серии выполнений нужна MIGRATION_2_0.sql",completionErr.message);
     if(allErr){console.error("reloadCloud error",allErr);toast(`Ошибка загрузки: ${allErr.message}`)}
     state.tasks=tasks||[];state.requests=requests||[];state.sentRequests=sentRequests||[];state.templates=templates||[];state.timeLogs=logs||[];
     state.friends=(friendProfiles||[]).filter(p=>friendIds.includes(p.id));
     state.__profiles=friendProfiles||[];
     state.friendRequests=friendRequests||[];state.sentFriendRequests=sentFriendRequests||[];state.schedule=schedule||[];
+    state.completionDays=(completionRows||[]).map(row=>row.day);
     restoreActiveTimer();scheduleNotifications();
     $("requestBadge").textContent=state.requests.length;$("requestBadge").classList.toggle("hidden",!state.requests.length);
     if($("friendBadge")){ $("friendBadge").textContent=state.friendRequests.length;$("friendBadge").classList.toggle("hidden",!state.friendRequests.length); }
@@ -444,6 +463,7 @@
   }
 
   function bindStatic(){
+    bindTimelineActions();
     qsa("[data-auth]").forEach(b=>b.onclick=()=>{state.authMode=b.dataset.auth;qsa("[data-auth]").forEach(x=>x.classList.toggle("active",x===b));$("nameField").classList.toggle("hidden",state.authMode!=="signup");$("authSubmit").textContent=state.authMode==="signup"?"Создать аккаунт":"Войти"});
     $("authForm").onsubmit=authSubmit;
     $("demoBtn").onclick=()=>{state.demo=true;state.user=demoData.profiles[0];state.profile=state.user;loadDemo();showApp();toast("Открыт демо-режим")};
@@ -491,7 +511,7 @@
     document.addEventListener("keydown",e=>{if(state.section!=="week"||$("taskModal")?.classList.contains("hidden")===false)return;if(["INPUT","TEXTAREA","SELECT"].includes(document.activeElement?.tagName))return;if(e.key==="ArrowLeft")moveDay(state.calendarView==="week"?-7:-1);if(e.key==="ArrowRight")moveDay(state.calendarView==="week"?7:1)});
     let touchX=null;
     $("weekGrid").addEventListener("touchstart",e=>{touchX=e.changedTouches[0].clientX},{passive:true});
-    $("weekGrid").addEventListener("touchend",e=>{if(touchX===null)return;if(state.calendarView==="week"){touchX=null;return}const dx=e.changedTouches[0].clientX-touchX;touchX=null;if(Math.abs(dx)>45)moveDay(dx<0?(state.calendarView==="week"?7:1):(state.calendarView==="week"?-7:-1))},{passive:true});
+    $("weekGrid").addEventListener("touchend",e=>{if(touchX===null)return;if(state.movingTaskId){touchX=null;return}if(state.calendarView==="week"){touchX=null;return}const dx=e.changedTouches[0].clientX-touchX;touchX=null;if(Math.abs(dx)>45)moveDay(dx<0?(state.calendarView==="week"?7:1):(state.calendarView==="week"?-7:-1))},{passive:true});
     $("addTaskBtn").onclick=()=>openTask();
     $("addTemplateBtn").onclick=()=>$("templateModal").classList.remove("hidden");
     $("taskRecurring").onchange=e=>$("recurrenceBox").classList.toggle("hidden",!e.target.checked);
@@ -762,8 +782,8 @@
           if(offset>15&&height-offset>15)addMark(minute,offset);
         }
         if(index===agendaEntries.length-1)addMark(e.end,height,"agenda-hour-last");
-        return `<div class="agenda-row agenda-free-row" style="height:${height}px" data-gap-minutes="${duration}" aria-label="Промежуток ${clockTime(e.start)}–${e.end===1440?"24:00":clockTime(e.end)}">
-          <div class="agenda-free-space" aria-hidden="true"></div>${marks.join("")}
+        return `<div class="agenda-row agenda-free-row" style="height:${height}px" data-gap-start="${e.start}" data-gap-end="${e.end}" data-gap-minutes="${duration}" data-date="${ds}" aria-label="Промежуток ${clockTime(e.start)}–${e.end===1440?"24:00":clockTime(e.end)}">
+          <div class="agenda-free-space">${duration>=10?'<button type="button" class="gap-add-button" data-quick-add aria-label="Добавить задачу в этот промежуток" title="Добавить задачу здесь">＋</button>':""}</div>${marks.join("")}
         </div>`;
       }
       const range=`<div class="agenda-time" aria-label="${esc(timeRange(e.start,e.end))}"><time>${clockTime(e.start)}</time><span class="agenda-time-dash">–</span><time>${clockTime(e.end)}</time>${e.end>=1440?'<span class="agenda-next-day">+1 день</span>':""}</div>`;
@@ -771,7 +791,7 @@
         const item=e.data;
         return `<div class="agenda-row agenda-schedule-row">${range}<div class="schedule-track-item ${item.kind==="school"?"schedule-school":"schedule-extra"}"><strong>${esc(item.title)}</strong><span>${esc(item.kind==="school"?"Занятие":"Дополнительное занятие")}</span></div></div>`;
       }
-      return `<div class="agenda-row agenda-task-row">${range}${taskBlockHtml(e.data)}</div>`;
+      return `<div class="agenda-row agenda-task-row" data-task-id="${e.data.seriesId||e.data.id}" ${e.data.owner_id===currentUserId()&&!e.data.recurrence&&!(window.matchMedia&&window.matchMedia("(pointer: coarse)").matches)?'draggable="true" title="Перетащи задачу в свободный промежуток"':""}>${range}${taskBlockHtml(e.data)}</div>`;
     }).join("");
     const empty=!tasks.length && !events.length;
     $("weekGrid").innerHTML=`<div class="day-col ${isToday(ds)?"today-day":""}">
@@ -818,6 +838,118 @@
     localStorage.setItem("week-calendar-view","day");renderWeek();renderStats();
   };
   window.openTaskForDate=ds=>{openTask();$("taskDate").value=ds;updateConflictWarning()};
+
+  // Click in a free interval to create a task; drop or long-press to move one.
+  // Snap to 5 minutes and never silently overlap another scheduled block.
+  function gapTime(gap,clientY,duration){
+    const start=Number(gap.dataset.gapStart),end=Number(gap.dataset.gapEnd);
+    if(end-start<duration)return null;
+    const rect=gap.getBoundingClientRect();
+    const ratio=rect.height>0?Math.max(0,Math.min(1,(clientY-rect.top)/rect.height)):0;
+    const raw=start+(end-start)*ratio;
+    const snapped=Math.round(raw/5)*5;
+    return Math.max(start,Math.min(snapped,end-duration,1440-duration));
+  }
+  function openTaskInGap(gap,clientY){
+    const free=Number(gap.dataset.gapEnd)-Number(gap.dataset.gapStart);
+    if(free<5){toast("В этом промежутке слишком мало времени");return}
+    const preferred=Math.max(5,Number(localStorage.getItem("week-default-duration")||60));
+    const duration=Math.min(Math.max(5,Math.floor(preferred/5)*5),Math.floor(free/5)*5);
+    const start=gapTime(gap,clientY,duration);
+    if(start===null)return;
+    openTask();$("taskDate").value=gap.dataset.date;
+    $("taskTime").value=clockTime(start);
+    $("taskDuration").value=duration;
+    updateConflictWarning();
+  }
+  function cancelMove(){
+    state.movingTaskId=null;state.draggedTaskId=null;
+    $("weekGrid").classList.remove("timeline-moving");
+    $("timelineMoveHint").classList.add("hidden");
+    qsa(".agenda-drag-source,.agenda-drop-hover").forEach(x=>x.classList.remove("agenda-drag-source","agenda-drop-hover"));
+  }
+  function startMove(id){
+    const task=state.tasks.find(x=>x.id===id);
+    if(!task||task.owner_id!==currentUserId()||task.recurrence){
+      toast("Перемещение доступно для своих неповторяющихся задач");return;
+    }
+    state.movingTaskId=id;
+    $("weekGrid").classList.add("timeline-moving");
+    $("timelineMoveHint").classList.remove("hidden");
+    qsa(".agenda-task-row").forEach(x=>x.classList.toggle("agenda-drag-source",x.dataset.taskId===id));
+  }
+  async function moveTaskToGap(id,gap,clientY){
+    const task=state.tasks.find(x=>x.id===id);
+    if(!task||task.owner_id!==currentUserId()||task.recurrence){toast("Такую задачу нельзя переместить здесь");cancelMove();return}
+    const start=gapTime(gap,clientY,minutes(task));
+    if(start===null){toast("Задача не помещается в выбранный промежуток");return}
+    const date=gap.dataset.date,time=clockTime(start);
+    if(date===task.date&&String(task.start_time||"").slice(0,5)===time){cancelMove();return}
+    const candidate={...task,date,start_time:time};
+    // The gap is computed from all task and schedule intervals. Recheck before persisting.
+    const conflict=visibleTasks().some(t=>t.id!==id&&t.start_time&&occursOn(t,date)&&
+      start<toMin(t.start_time)+minutes(t)&&start+minutes(task)>toMin(t.start_time)) ||
+      state.schedule.some(item=>Number(item.day_of_week)===new Date(date+"T00:00:00").getDay()&&
+        item.start_time&&item.end_time&&start<toMin(item.end_time)&&start+minutes(task)>toMin(item.start_time));
+    if(conflict){toast("Это время уже занято. Выбери другой промежуток");return}
+    if(state.demo){const original=demoData.tasks.find(x=>x.id===id);if(original){original.date=date;original.start_time=time;original.fixed_time=true}saveDemo();loadDemo()}
+    else{
+      const {error}=await sb.from("tasks").update({date,start_time:time,fixed_time:true}).eq("id",id).eq("owner_id",state.user.id);
+      if(error){toast(error.message);return}
+      await reloadCloud();
+    }
+    cancelMove();renderAll();toast(`Перенесено на ${time}`);
+  }
+  function bindTimelineActions(){
+    const grid=$("weekGrid");
+    grid.addEventListener("click",e=>{
+      const gap=e.target.closest(".agenda-free-row");
+      if(!gap)return;
+      if(!e.target.closest(".agenda-free-space"))return;
+      if(state.movingTaskId){void moveTaskToGap(state.movingTaskId,gap,e.clientY);return}
+      if(e.target.closest("[data-quick-add]"))openTaskInGap(gap,e.clientY);
+    });
+    grid.addEventListener("dragstart",e=>{
+      const row=e.target.closest(".agenda-task-row");
+      if(!row||e.target.closest("button,input,a")){e.preventDefault();return}
+      const task=state.tasks.find(t=>t.id===row.dataset.taskId);
+      if(!task||task.recurrence||task.owner_id!==currentUserId()){e.preventDefault();return}
+      state.draggedTaskId=task.id;
+      grid.classList.add("timeline-moving");
+      row.classList.add("agenda-drag-source");
+      e.dataTransfer.effectAllowed="move";
+      e.dataTransfer.setData("text/plain",task.id);
+    });
+    grid.addEventListener("dragover",e=>{
+      const gap=e.target.closest(".agenda-free-row");
+      if(!gap||!state.draggedTaskId)return;
+      e.preventDefault();e.dataTransfer.dropEffect="move";
+      qsa(".agenda-drop-hover").forEach(x=>x.classList.remove("agenda-drop-hover"));
+      gap.classList.add("agenda-drop-hover");
+    });
+    grid.addEventListener("drop",e=>{
+      const gap=e.target.closest(".agenda-free-row");
+      if(!gap||!state.draggedTaskId)return;
+      e.preventDefault();const id=state.draggedTaskId;
+      void moveTaskToGap(id,gap,e.clientY);
+    });
+    grid.addEventListener("dragend",()=>cancelMove());
+    // On touch screens, hold the card, then tap the desired free interval.
+    let pressTimer=null,startX=0,startY=0,pressId="";
+    const clearPress=()=>{clearTimeout(pressTimer);pressTimer=null};
+    grid.addEventListener("pointerdown",e=>{
+      if(e.pointerType!=="touch"||state.calendarView!=="day")return;
+      const row=e.target.closest(".agenda-task-row");
+      if(!row||e.target.closest("button,input,a"))return;
+      startX=e.clientX;startY=e.clientY;pressId=row.dataset.taskId;
+      clearPress();pressTimer=setTimeout(()=>{startMove(pressId);pressTimer=null},480);
+    });
+    grid.addEventListener("pointermove",e=>{if(pressTimer&&(Math.abs(e.clientX-startX)>12||Math.abs(e.clientY-startY)>12))clearPress()});
+    grid.addEventListener("pointerup",clearPress);
+    grid.addEventListener("pointercancel",clearPress);
+    $("cancelTimelineMove").onclick=cancelMove;
+  }
+
 
   function applyTheme(theme){
     localStorage.setItem("week-theme",theme);
@@ -991,7 +1123,6 @@
       updateConflictWarning();$("taskConflictWarning").scrollIntoView({behavior:"smooth",block:"nearest"});
       toast("Проверь пересечения или разреши сохранить задачу");return;
     }
-    localStorage.setItem("week-default-duration", String(base.duration));
     if(state.demo){
       if(id){const t=demoData.tasks.find(x=>x.id===id);if(t)Object.assign(t,base)}
       else if(dest==="proposal"){const friendId=$("taskFriend").value||state.friends[0]?.id||otherId();demoData.requests.push({id:uid(),from_user_id:currentUserId(),to_user_id:friendId,title:base.title,description:base.description,date:base.date,start_time:base.start_time,duration:base.duration,category:base.category,priority:base.priority,color:base.color,checklist:base.checklist,status:"pending",created_at:new Date().toISOString()})}
@@ -1028,9 +1159,17 @@
   }
 
   window.weekToggle=async(id,checked)=>{
-    if(state.demo){const t=demoData.tasks.find(x=>x.id===id);if(t)t.status=checked?"done":"open";saveDemo();loadDemo()}
-    else await sb.from("tasks").update({status:checked?"done":"open"}).eq("id",id);
-    await reloadCloud();renderWeek();scheduleNotifications();
+    const t=state.tasks.find(x=>x.id===id);if(!t)return;
+    const wasDone=t.status==="done";
+    if(state.demo){const original=demoData.tasks.find(x=>x.id===id);if(original)original.status=checked?"done":"open";saveDemo();loadDemo()}
+    else{
+      const {error}=await sb.from("tasks").update({status:checked?"done":"open"}).eq("id",id);
+      if(error){toast(error.message);return}
+    }
+    // A day counts when the user completes at least one task. School schedule
+    // and plain task creation never mark an activity day.
+    if(checked&&!wasDone)await recordCompletionDay();
+    await reloadCloud();renderWeek();renderStats();scheduleNotifications();
   };
   window.weekEdit=id=>{const t=state.tasks.find(x=>x.id===id);if(t)openTask(t)};
   window.weekDelete=async id=>{
@@ -1187,18 +1326,84 @@
   function weekTasksForStats(){
     return expandOccurrences(state.tasks.filter(t=>t.status!=="archived"),state.weekStart,7);
   }
+  function statsDate(offset){
+    const date=new Date(state.weekStart);date.setDate(date.getDate()+offset);return date;
+  }
+  function formatMinutes(value){return `${Math.floor(value/60)} ч ${value%60} мин`}
+  function taskCountLabel(count){
+    const last=count%10, two=count%100;
+    return `${count} ${two>=11&&two<=14?"задач":last===1?"задача":last>=2&&last<=4?"задачи":"задач"}`;
+  }
+  function completionStreak(){
+    const days=new Set(state.completionDays||[]);
+    let pointer=new Date();
+    if(!days.has(iso(pointer)))pointer.setDate(pointer.getDate()-1);
+    let current=0;
+    while(days.has(iso(pointer))){current++;pointer.setDate(pointer.getDate()-1)}
+    const ordered=[...days].sort();
+    let longest=0,running=0,prior="";
+    for(const day of ordered){
+      const d=new Date(day+"T00:00:00");d.setDate(d.getDate()-1);
+      running=prior===iso(d)?running+1:1;
+      longest=Math.max(longest,running);prior=day;
+    }
+    return {current,longest,days};
+  }
   function renderStats(){
-    const ts=weekTasksForStats(),total=ts.reduce((a,t)=>a+minutes(t),0),done=ts.filter(t=>t.status==="done").length;
-    const avg=total/7,loaded=[...Array(7)].map((_,i)=>ts.filter(t=>t.date===iso(new Date(state.weekStart.getTime()+i*86400000))).reduce((a,t)=>a+minutes(t),0));
-    const max=loaded.indexOf(Math.max(...loaded));
-    const weekEnd=new Date(state.weekStart.getTime()+7*86400000);
-    const trackedMin=state.timeLogs.filter(l=>l.ended_at && new Date(l.started_at)>=state.weekStart && new Date(l.started_at)<weekEnd)
-      .reduce((a,l)=>a+Math.round((new Date(l.ended_at)-new Date(l.started_at))/60000),0);
-    $("statsCards").innerHTML=[["Запланировано",`${Math.floor(total/60)}ч ${total%60}м`],["Задач",ts.length],["Выполнено",`${done}/${ts.length||0}`],["Среднее в день",`${Math.floor(avg/60)}ч ${Math.round(avg%60)}м`],["Отслежено таймером",`${Math.floor(trackedMin/60)}ч ${trackedMin%60}м`]].map(x=>`<div class="stat"><span class="muted">${x[0]}</span><strong>${x[1]}</strong></div>`).join("");
-    const maxVal=Math.max(...loaded,1);
-    $("statsBars").innerHTML=loaded.map((v,i)=>`<div class="bar-wrap"><div class="small">${Math.round(v/60*10)/10}ч</div><div class="bar" style="height:${Math.max(3,v/maxVal*170)}px"></div><div class="bar-label">${dayName(i)}</div></div>`).join("");
-    const cats={};ts.forEach(t=>cats[t.category]=(cats[t.category]||0)+minutes(t));
-    $("categoryStats").innerHTML=Object.entries(cats).sort((a,b)=>b[1]-a[1]).map(([c,v])=>`<div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line)"><span>${esc(c)}</span><strong>${Math.floor(v/60)}ч ${v%60}м</strong></div>`).join("")||"<p class='muted'>Нет задач.</p>";
+    const ts=weekTasksForStats();
+    const done=ts.filter(t=>t.status==="done").length;
+    // The schedule is weekly recurring. Generate one occurrence for each weekday.
+    const days=Array.from({length:7},(_,i)=>{
+      const date=statsDate(i),day=iso(date);
+      const tasks=ts.filter(t=>t.date===day);
+      const schedule=(state.schedule||[]).filter(x=>Number(x.day_of_week)===date.getDay()&&x.start_time&&x.end_time);
+      const taskMin=tasks.reduce((a,t)=>a+minutes(t),0);
+      const schoolMin=schedule.filter(x=>x.kind==="school").reduce((a,x)=>a+Math.max(0,toMin(x.end_time)-toMin(x.start_time)),0);
+      const extraMin=schedule.filter(x=>x.kind!=="school").reduce((a,x)=>a+Math.max(0,toMin(x.end_time)-toMin(x.start_time)),0);
+      return {date,day,tasks,taskMin,schoolMin,extraMin,total:taskMin+schoolMin+extraMin};
+    });
+    const sum=key=>days.reduce((a,d)=>a+d[key],0);
+    const taskMin=sum("taskMin"),schoolMin=sum("schoolMin"),extraMin=sum("extraMin"),total=sum("total");
+    const completion=ts.length?Math.round(done/ts.length*100):0;
+    const weekEnd=statsDate(7);
+    const trackedMin=state.timeLogs.filter(l=>l.ended_at&&new Date(l.started_at)>=state.weekStart&&new Date(l.started_at)<weekEnd)
+      .reduce((a,l)=>a+Math.max(0,Math.round((new Date(l.ended_at)-new Date(l.started_at))/60000)),0);
+    const stats=[
+      ["Вся нагрузка",formatMinutes(total),"Задачи и занятия"],
+      ["Личные и общие задачи",formatMinutes(taskMin),taskCountLabel(ts.length)],
+      ["Школа",formatMinutes(schoolMin),"Из расписания"],
+      ["Дополнительные занятия",formatMinutes(extraMin),"Из расписания"],
+      ["Выполнено",`${done} из ${ts.length}`,`${completion}% задач`],
+      ["Таймер",formatMinutes(trackedMin),"Фактически отслежено"]
+    ];
+    $("statsCards").innerHTML=stats.map(([name,value,note],i)=>`<div class="stat stat-enhanced${i===0?" stat-primary":""}"><span class="muted">${esc(name)}</span><strong>${esc(value)}</strong><small>${esc(note)}</small></div>`).join("");
+    $("statsProgress").innerHTML=`<div class="stat-progress-head"><strong>${completion}%</strong><span class="muted">${done} из ${ts.length}</span></div>
+      <div class="stats-progress-track" role="progressbar" aria-label="Выполнено задач" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${completion}"><span style="width:${completion}%"></span></div>
+      <p class="small muted">Занятия из расписания не считаются выполненными задачами.</p>`;
+    const streak=completionStreak(),today=new Date();
+    const cells=Array.from({length:28},(_,i)=>{
+      const d=new Date(today);d.setDate(d.getDate()-(27-i));const value=iso(d);
+      return `<span class="streak-day ${streak.days.has(value)?"active":""} ${i===27?"is-today":""}" title="${value}${streak.days.has(value)?" · задача выполнена":""}" aria-label="${value}${streak.days.has(value)?": есть выполненная задача":": без выполненных задач"}"></span>`;
+    }).join("");
+    $("statsStreak").innerHTML=`<div class="streak-count">${streak.current}<span> ${streak.current===1?"день":"дней"} подряд</span></div>
+      <p class="small muted">Рекорд: ${streak.longest} дн. Серия сохраняется, если ты выполнил хотя бы одну задачу за день.</p>
+      <div class="streak-grid" role="group" aria-label="Отметки выполнения за 28 дней">${cells}</div>
+      <p class="small muted">Каждый фиолетовый квадрат означает день с выполненной задачей. Сегодня или вчера может быть последним днём серии.</p>`;
+    const maxVal=Math.max(1,...days.map(d=>d.total));
+    $("statsBars").innerHTML=days.map((d,i)=>{
+      const segments=[["tasks",d.taskMin],["school",d.schoolMin],["extra",d.extraMin]];
+      const bar=segments.filter(([,v])=>v>0).map(([type,v])=>`<span class="stat-bar-${type}" style="height:${Math.max(2,v/maxVal*178)}px" title="${type==="tasks"?"Задачи":type==="school"?"Школа":"Доп. занятия"}: ${formatMinutes(v)}"></span>`).join("");
+      return `<div class="bar-wrap" title="${dayName(i)}: ${formatMinutes(d.total)}"><div class="small stats-bar-total">${(d.total/60).toFixed(1)} ч</div><div class="stats-bar-stack" aria-label="${dayName(i)}: ${formatMinutes(d.total)}">${bar}</div><div class="bar-label">${dayName(i)}</div></div>`;
+    }).join("");
+    const cats={};
+    ts.forEach(t=>cats[t.category||"Другое"]=(cats[t.category||"Другое"]||0)+minutes(t));
+    if(schoolMin)cats["Школьные занятия"]=(cats["Школьные занятия"]||0)+schoolMin;
+    if(extraMin)cats["Дополнительные занятия"]=(cats["Дополнительные занятия"]||0)+extraMin;
+    $("categoryStats").innerHTML=Object.entries(cats).sort((a,b)=>b[1]-a[1]).map(([name,value])=>{
+      const pct=total?Math.round(value/total*100):0;
+      return `<div class="stats-category-row"><div class="stats-category-head"><span>${esc(name)}</span><strong>${formatMinutes(value)}</strong></div>
+        <div class="stats-category-track"><span style="width:${pct}%"></span></div></div>`;
+    }).join("")||"<p class='muted'>На этой неделе нет задач и занятий.</p>";
   }
 
   function renderProfile(){
