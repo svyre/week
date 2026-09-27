@@ -7,7 +7,7 @@
 
   let state = {
     user:null, profile:null, section:"week", person:"me",
-    weekStart: startOfWeek(new Date()), currentDate: new Date(), calendarView:localStorage.getItem("week-calendar-view")==="week"?"week":"day", tasks:[], requests:[], sentRequests:[], templates:[], timeLogs:[], activeTimer:null,
+    weekStart: startOfWeek(new Date()), currentDate: new Date(), calendarView:localStorage.getItem("week-calendar-view")==="week"?"week":"day", tasks:[], requests:[], sentRequests:[], requestTab:"incoming", templates:[], timeLogs:[], activeTimer:null,
     friends:[], friendRequests:[], sentFriendRequests:[], schedule:[], personalSchedule:[], classGroup:null, classSchedule:[], classMembers:[], classViewGroup:null, classViewSchedule:[], classExceptions:[], isWeekAdmin:false, adminGroups:[], adminClassId:null, lastClassCode:null, completionDays:[], movingTaskId:null, draggedTaskId:null,
     demo: !hasSupabase, authMode:"login", onboardingStep:1, sendingFriendIds:new Set()
   };
@@ -537,7 +537,7 @@
     const raw=localStorage.getItem("week-demo");
     if(raw){try{Object.assign(demoData,JSON.parse(raw))}catch{}}
     state.tasks=demoData.tasks.filter(t=>t.owner_id===currentUserId()||t.visibility==="shared");
-    state.requests=demoData.requests.filter(r=>r.to_user_id===currentUserId()&&r.status!=="rejected");
+    state.requests=demoData.requests.filter(r=>r.to_user_id===currentUserId()&&r.status==="pending");
     state.sentRequests=demoData.requests.filter(r=>r.from_user_id===currentUserId());
     state.templates=demoData.templates;
     state.timeLogs=(demoData.timeLogs||[]).filter(l=>l.user_id===currentUserId());
@@ -634,7 +634,9 @@
     ]);
     const friendIds=(friendRows||[]).map(r=>r.user_a===state.user.id?r.user_b:r.user_a);
     const requesterIds=(friendRequests||[]).map(r=>r.from_user_id);
-    const profileIds=[...new Set([...friendIds,...requesterIds])];
+    // Names shown in the incoming/outgoing proposal lists are public profile fields only.
+    const proposalProfileIds=[...(requests||[]).map(r=>r.from_user_id),...(sentRequests||[]).map(r=>r.to_user_id)];
+    const profileIds=[...new Set([...friendIds,...requesterIds,...proposalProfileIds])];
     const {data:friendProfiles,error:profileErr}=profileIds.length?
       await sb.from("public_profiles").select("id,display_name,username").in("id",profileIds):{data:[],error:null};
     const allErr=windowErr||recurringErr||openErr||reqErr||sentReqErr||tplErr||logsErr||friendsErr||friendReqErr||sentFriendReqErr||scheduleErr||profileErr;
@@ -731,6 +733,10 @@
     $("settingsBtn").onclick=()=>switchSection("settings");
     $("mobileSettingsBtn").onclick=()=>switchSection("settings");
     qsa(".nav-btn").forEach(b=>b.onclick=()=>switchSection(b.dataset.section));
+    qsa("[data-request-tab]").forEach(b=>b.onclick=()=>{
+      state.requestTab=b.dataset.requestTab;
+      renderRequests();
+    });
     $("friendSearchForm").onsubmit=searchFriend;
     $("classJoinForm").onsubmit=joinClass;
     $("classCreateForm").onsubmit=createClass;
@@ -1510,18 +1516,42 @@
   };
 
   function renderRequests(){
-    const el=$("requestsList");
-    if(!state.requests.length){el.innerHTML='<p class="muted">Новых предложений нет.</p>';return}
-    el.innerHTML=state.requests.map(r=>`<div class="request-card"${taskColorAttr(r)}>
+    const incoming=$('requestsList'),outgoing=$('sentRequestsList');
+    const viewingOutgoing=state.requestTab==='outgoing';
+    qsa('[data-request-tab]').forEach(button=>{
+      const selected=button.dataset.requestTab===(viewingOutgoing?'outgoing':'incoming');
+      button.classList.toggle('active',selected);
+      button.setAttribute('aria-selected',String(selected));
+      button.tabIndex=selected?0:-1;
+    });
+    incoming.classList.toggle('hidden',viewingOutgoing);
+    outgoing.classList.toggle('hidden',!viewingOutgoing);
+    const displayPerson=userId=>{
+      const profile=(state.__profiles||[]).find(p=>p.id===userId)||
+        (state.friends||[]).find(p=>p.id===userId)||
+        (state.demo?demoData.profiles.find(p=>p.id===userId):null);
+      return profile?esc(profile.display_name||profile.username||'Пользователь'):'Пользователь';
+    };
+    const taskDetails=r=>`<div class="task-meta">${fmtDate(r.date)}${r.start_time?' • '+esc(String(r.start_time).slice(0,5)):''} • ${Number(r.duration)||60} мин • ${esc(r.category||'Другое')}</div>`;
+    incoming.innerHTML=state.requests.length?state.requests.map(r=>`<div class="request-card"${taskColorAttr(r)}>
+      <div class="small muted request-person">От: ${displayPerson(r.from_user_id)}</div>
       <strong>${esc(r.title)}</strong>
-      <div class="task-meta">${fmtDate(r.date)}${r.start_time?" • "+r.start_time.slice(0,5):""} • ${r.duration||60} мин • ${esc(r.category||"Другое")}</div>
-      <p>${esc(r.description||"Без описания")}</p>
+      ${taskDetails(r)}
+      <p>${esc(r.description||'Без описания')}</p>
       <div class="actions"><button class="primary" onclick="window.acceptRequest('${r.id}')">Принять</button><button class="secondary" onclick="window.rejectRequest('${r.id}')">Отклонить</button><button class="secondary" onclick="window.counterRequest('${r.id}')">Предложить другое время</button></div>
-    </div>`).join("");
+    </div>`).join(''):'<p class="muted">Новых входящих предложений нет.</p>';
+    const statusNames={pending:'Ожидает ответа',accepted:'Принято',rejected:'Отклонено'};
+    outgoing.innerHTML=state.sentRequests.length?state.sentRequests.map(r=>`<div class="request-card"${taskColorAttr(r)}>
+      <div class="small muted request-person">Кому: ${displayPerson(r.to_user_id)}</div>
+      <strong>${esc(r.title)}</strong>
+      ${taskDetails(r)}
+      <p>${esc(r.description||'Без описания')}</p>
+      <div class="request-status" data-status="${esc(r.status||'pending')}">${esc(statusNames[r.status]||'Статус неизвестен')}</div>
+    </div>`).join(''):'<p class="muted">Ты ещё не отправлял предложений.</p>';
   }
   window.acceptRequest=async id=>{
     const r=state.requests.find(x=>x.id===id);if(!r)return;
-    if(state.demo){demoData.requests=demoData.requests.filter(x=>x.id!==id);demoData.tasks.push({id:uid(),owner_id:r.from_user_id,visibility:"shared",status:"open",title:r.title,description:r.description,date:r.date,start_time:r.start_time,duration:r.duration,category:r.category,priority:r.priority,color:taskColor(r.color),checklist:checklistFor(r)});saveDemo();loadDemo()}
+    if(state.demo){demoData.requests=demoData.requests.map(x=>x.id===id?{...x,status:"accepted"}:x);demoData.tasks.push({id:uid(),owner_id:r.from_user_id,visibility:"shared",status:"open",title:r.title,description:r.description,date:r.date,start_time:r.start_time,duration:r.duration,category:r.category,priority:r.priority,color:taskColor(r.color),checklist:checklistFor(r)});saveDemo();loadDemo()}
     else{
       // The recipient accepts the proposal, so the shared task must be created
       // with the recipient as owner. RLS policies allow the authenticated user
@@ -1538,9 +1568,9 @@
     renderAll();toast("Предложение принято");
   };
   window.rejectRequest=async id=>{
-    if(state.demo){demoData.requests=demoData.requests.map(r=>r.id===id?{...r,status:"rejected"}:r);demoData.requests=demoData.requests.filter(r=>r.status==="pending");saveDemo();loadDemo()}
+    if(state.demo){demoData.requests=demoData.requests.map(r=>r.id===id?{...r,status:"rejected"}:r);saveDemo();loadDemo()}
     else{await sb.from("task_requests").update({status:"rejected"}).eq("id",id).eq("to_user_id",state.user.id);await reloadCloud()}
-    renderRequests();toast("Предложение отклонено");
+    renderAll();toast("Предложение отклонено");
   };
   window.counterRequest=id=>{
     const r=state.requests.find(x=>x.id===id);if(!r)return;

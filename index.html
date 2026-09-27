@@ -131,8 +131,13 @@
 
       <section id="requestsSection" class="section hidden">
         <div class="panel">
-          <div class="panel-head"><h2>Предложения задач</h2><span class="muted small">Принять или отклонить</span></div>
-          <div id="requestsList"></div>
+          <div class="panel-head"><h2>Предложения задач</h2></div>
+          <div class="tabs request-tabs" role="tablist" aria-label="Предложения задач">
+            <button type="button" class="tab active" id="incomingRequestsTab" data-request-tab="incoming" role="tab" aria-controls="requestsList" aria-selected="true">Входящие</button>
+            <button type="button" class="tab" id="outgoingRequestsTab" data-request-tab="outgoing" role="tab" aria-controls="sentRequestsList" aria-selected="false">Исходящие</button>
+          </div>
+          <div id="requestsList" role="tabpanel" aria-labelledby="incomingRequestsTab"></div>
+          <div id="sentRequestsList" role="tabpanel" aria-labelledby="outgoingRequestsTab" class="hidden"></div>
         </div>
       </section>
 

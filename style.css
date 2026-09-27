@@ -590,3 +590,14 @@ html[data-theme="dark"] .gap-add-button{background:#292e36;color:#d6cee5;border-
 @media(max-width:700px){.class-schedule-details{padding:2px 10px 10px}.class-lesson .class-edit-one{margin-left:0}.class-role-select{max-width:100%;width:100%}#classMembersList .friend-row .actions{max-width:48%;flex-wrap:wrap}.class-schedule-details>summary .small{font-size:11px}}
 
 .oneoff-badge{font-size:11px;color:#8960b5;font-weight:650}#classResetException{margin-right:auto}
+
+/* week. 2.3.1: incoming / outgoing task proposals */
+.request-tabs{margin:16px 0 14px;max-width:520px}
+.request-person{margin-bottom:6px}
+.request-status{display:inline-flex;margin-top:12px;padding:7px 11px;border-radius:999px;font-size:12px;font-weight:700;background:#f0eee8;color:#595a56}
+.request-status[data-status="accepted"]{background:#e3f5e9;color:#207746}
+.request-status[data-status="rejected"]{background:#f7e8e8;color:#a04343}
+.request-status[data-status="pending"]{background:#efeaff;color:#674bb3}
+html[data-theme="dark"] .request-status[data-status="accepted"]{background:#183c2d;color:#8be1ae}
+html[data-theme="dark"] .request-status[data-status="rejected"]{background:#412727;color:#ffabab}
+html[data-theme="dark"] .request-status[data-status="pending"]{background:#302746;color:#ceb9ff}
