@@ -1,18 +1,21 @@
-const CACHE="week-v19-safe-area";
+const CACHE="week-v22-classes";
 const ASSETS=["./","./index.html","./style.css","./app.js","./config.js","./manifest.webmanifest","./week.png","./weekdark.png","./favicon.ico","./week-32.png","./week-180.png","./week-192.png","./week-512.png"];
 self.addEventListener("install",e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS)).then(()=>self.skipWaiting())));
 self.addEventListener("activate",e=>e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim())));
 // Network-first: всегда пытаемся получить свежий файл с сервера и только при
 // отсутствии сети откатываемся на то, что было закэшировано раньше.
 self.addEventListener("fetch",e=>{
-  if(e.request.method!=="GET")return;
-  e.respondWith(
-    fetch(e.request).then(res=>{
+  // Only static assets from this site's origin. Do not cache authenticated API responses.
+  if(e.request.method!=="GET" || new URL(e.request.url).origin!==self.location.origin)return;
+  const allowed=["document","script","style","image","font","manifest"].includes(e.request.destination);
+  if(!allowed)return;
+  e.respondWith(fetch(e.request).then(res=>{
+    if(res.ok && res.status===200){
       const copy=res.clone();
-      caches.open(CACHE).then(c=>c.put(e.request,copy));
-      return res;
-    }).catch(()=>caches.match(e.request))
-  );
+      e.waitUntil(caches.open(CACHE).then(c=>c.put(e.request,copy)).catch(()=>{}));
+    }
+    return res;
+  }).catch(()=>caches.match(e.request).then(c=>c||Response.error())));
 });
 self.addEventListener("push",e=>{
   let data={title:"week.",body:"Новое напоминание",tag:"week-reminder",url:"./"};

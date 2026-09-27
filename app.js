@@ -8,7 +8,7 @@
   let state = {
     user:null, profile:null, section:"week", person:"me",
     weekStart: startOfWeek(new Date()), currentDate: new Date(), calendarView:localStorage.getItem("week-calendar-view")==="week"?"week":"day", tasks:[], requests:[], sentRequests:[], templates:[], timeLogs:[], activeTimer:null,
-    friends:[], friendRequests:[], sentFriendRequests:[], schedule:[], completionDays:[], movingTaskId:null, draggedTaskId:null,
+    friends:[], friendRequests:[], sentFriendRequests:[], schedule:[], personalSchedule:[], classGroup:null, classSchedule:[], classMembers:[], classViewGroup:null, classViewSchedule:[], isWeekAdmin:false, adminGroups:[], adminClassId:null, lastClassCode:null, completionDays:[], movingTaskId:null, draggedTaskId:null,
     demo: !hasSupabase, authMode:"login", onboardingStep:1, sendingFriendIds:new Set()
   };
 
@@ -20,7 +20,7 @@
     tasks:[], requests:[], templates:[
       {id:"t1",title:"Сделать домашку",category:"Школа",duration:60,priority:"mandatory"},
       {id:"t2",title:"Подготовка к репетитору",category:"Репетитор",duration:45,priority:"desirable"}
-    ], timeLogs:[], schedules:[], completionDays:[], friendships:[{user_a:"demo-vadim",user_b:"demo-sonya"}], friendRequests:[]
+    ], timeLogs:[], schedules:[], classGroups:[], classMemberships:[], classSchedules:[], completionDays:[], friendships:[{user_a:"demo-vadim",user_b:"demo-sonya"}], friendRequests:[]
   };
 
   function uid(){return crypto.randomUUID ? crypto.randomUUID() : Date.now()+"-"+Math.random();}
@@ -367,6 +367,67 @@
     });
   }
 
+  function combineSchedules(){
+    // Для учеников класса школьные уроки общие. Личные дополнительные занятия остаются.
+    return state.classGroup ? [...(state.personalSchedule||[]).filter(s=>s.kind!=="school"),...(state.classSchedule||[])] : [...(state.personalSchedule||[])];
+  }
+  function setDemoClassView(){
+    const groups=demoData.classGroups||[];
+    state.classViewGroup=groups.find(g=>g.id===state.adminClassId)||state.classGroup||(state.isWeekAdmin?groups[0]:null)||null;
+    if(state.isWeekAdmin&&state.classViewGroup)state.adminClassId=state.classViewGroup.id;
+    state.classViewSchedule=(demoData.classSchedules||[]).filter(s=>s.class_id===state.classViewGroup?.id);
+    state.classMembers=(demoData.classMemberships||[]).filter(m=>m.class_id===state.classViewGroup?.id)
+      .map(m=>demoData.profiles.find(p=>p.id===m.user_id)).filter(Boolean);
+  }
+  async function fetchClassContext(personalSchedule){
+    const uid=state.user.id;
+    const [{data:membership,error:memberErr},{data:adminRole,error:roleErr}]=await Promise.all([
+      sb.from("class_members").select("class_id").eq("user_id",uid).maybeSingle(),
+      sb.from("week_admins").select("user_id").eq("user_id",uid).maybeSingle()
+    ]);
+    if(memberErr||roleErr){console.warn("Классы: выполни MIGRATION_2_2_CLASSES.sql",memberErr||roleErr);return false;}
+    state.isWeekAdmin=!!adminRole;
+    let groups=[];
+    if(state.isWeekAdmin){
+      const {data,error}=await sb.from("class_groups").select("id,name,schedule_updated_at").order("name");
+      if(error){console.warn("Классы",error);return false;}
+      groups=data||[];
+    }else if(membership?.class_id){
+      const {data,error}=await sb.from("class_groups").select("id,name,schedule_updated_at").eq("id",membership.class_id).maybeSingle();
+      if(error){console.warn("Классы",error);return false;}
+      if(data)groups=[data];
+    }
+    state.adminGroups=state.isWeekAdmin?groups:[];
+    state.classGroup=groups.find(g=>g.id===membership?.class_id)||null;
+    state.classViewGroup=state.isWeekAdmin
+      ?groups.find(g=>g.id===state.adminClassId)||state.classGroup||groups[0]||null
+      :state.classGroup;
+    if(state.isWeekAdmin)state.adminClassId=state.classViewGroup?.id||null;
+    const ids=[...new Set([state.classGroup?.id,state.classViewGroup?.id].filter(Boolean))];
+    let items=[];
+    if(ids.length){
+      const {data,error}=await sb.from("class_schedule_items").select("id,class_id,day_of_week,title,start_time,end_time").in("class_id",ids).order("day_of_week").order("start_time");
+      if(error){console.warn("Расписание класса",error);return false;}
+      items=data||[];
+    }
+    state.classSchedule=items.filter(s=>s.class_id===state.classGroup?.id).map(s=>({...s,kind:"school"}));
+    state.personalSchedule=personalSchedule||[];
+    state.schedule=combineSchedules();
+    state.classViewSchedule=items.filter(s=>s.class_id===state.classViewGroup?.id);
+    state.classMembers=[];
+    if(state.classViewGroup){
+      const {data:memberRows,error}=await sb.from("class_members").select("user_id").eq("class_id",state.classViewGroup.id).order("joined_at");
+      if(error){console.warn("Участники",error);return false;}
+      const mids=(memberRows||[]).map(m=>m.user_id);
+      if(mids.length){
+        const {data:profiles,error:pErr}=await sb.from("public_profiles").select("id,display_name,username").in("id",mids);
+        if(pErr){console.warn("Участники",pErr);return false;}
+        state.classMembers=(profiles||[]).sort((a,b)=>a.display_name.localeCompare(b.display_name,"ru"));
+      }
+    }
+    return true;
+  }
+
   function loadDemo(){
     const raw=localStorage.getItem("week-demo");
     if(raw){try{Object.assign(demoData,JSON.parse(raw))}catch{}}
@@ -379,7 +440,14 @@
     state.friends=demoData.profiles.filter(p=>friendIds.includes(p.id));
     state.friendRequests=(demoData.friendRequests||[]).filter(r=>r.to_user_id===currentUserId()&&r.status==="pending");
     state.sentFriendRequests=(demoData.friendRequests||[]).filter(r=>r.from_user_id===currentUserId()&&r.status==="pending");
-    state.schedule=(demoData.schedules||[]).filter(r=>r.user_id===currentUserId());
+    state.personalSchedule=(demoData.schedules||[]).filter(r=>r.user_id===currentUserId());
+    state.isWeekAdmin=currentUserId()==="demo-vadim";
+    state.adminGroups=state.isWeekAdmin?(demoData.classGroups||[]):[];
+    const membership=(demoData.classMemberships||[]).find(m=>m.user_id===currentUserId());
+    state.classGroup=(demoData.classGroups||[]).find(g=>g.id===membership?.class_id)||null;
+    state.classSchedule=(demoData.classSchedules||[]).filter(s=>s.class_id===state.classGroup?.id).map(s=>({...s,kind:"school"}));
+    state.schedule=combineSchedules();
+    setDemoClassView();
     state.completionDays=(demoData.completionDays||[]).filter(x=>x.user_id===currentUserId()).map(x=>x.day);
     state.__profiles=demoData.profiles;
     restoreActiveTimer();
@@ -414,15 +482,45 @@
     setupRealtimeNotifications();
     await syncPushSubscription();
   }
-  async function reloadCloud(){
+  // A few months around the displayed day, plus earlier open and recurring series.
+  // Archived/completed historical rows are requested only when their month is opened.
+  function calendarQueryRange(){
+    const center=selectedDate(), start=new Date(center),end=new Date(center);
+    start.setDate(start.getDate()-45);end.setDate(end.getDate()+75);
+    return {start:iso(start),end:iso(end)};
+  }
+  function reloadCloud(){
+    if(state.cloudReloadPromise)return state.cloudReloadPromise;
+    const pending=fetchCloud();
+    state.cloudReloadPromise=pending;
+    pending.finally(()=>{if(state.cloudReloadPromise===pending)state.cloudReloadPromise=null}).catch(()=>{});
+    return pending;
+  }
+  async function fetchCloud(){
     if(state.demo){loadDemo();return}
-    const cutoff=new Date();cutoff.setDate(cutoff.getDate()-60);
-    const [{data:tasks,error:tasksErr},{data:requests,error:reqErr},{data:sentRequests,error:sentReqErr},{data:templates,error:tplErr},{data:logs,error:logsErr},{data:friendRows,error:friendsErr},{data:friendRequests,error:friendReqErr},{data:sentFriendRequests,error:sentFriendReqErr},{data:schedule,error:scheduleErr},{data:completionRows,error:completionErr}]=await Promise.all([
-      sb.from("tasks").select("*").order("date").order("start_time"),
+    const range=calendarQueryRange();
+    // Time logs for the visible window plus any timer that has not ended.
+    const logStart=new Date(range.start+"T00:00:00");logStart.setDate(logStart.getDate()-1);
+    const logEnd=new Date(range.end+"T00:00:00");logEnd.setDate(logEnd.getDate()+2);
+    const [
+      {data:windowTasks,error:windowErr},
+      {data:olderRecurring,error:recurringErr},
+      {data:olderOpen,error:openErr},
+      {data:requests,error:reqErr},{data:sentRequests,error:sentReqErr},
+      {data:templates,error:tplErr},{data:logs,error:logsErr},
+      {data:friendRows,error:friendsErr},
+      {data:friendRequests,error:friendReqErr},
+      {data:sentFriendRequests,error:sentFriendReqErr},
+      {data:schedule,error:scheduleErr},
+      {data:completionRows,error:completionErr}
+    ]=await Promise.all([
+      sb.from("tasks").select("*").gte("date",range.start).lte("date",range.end).order("date").order("start_time"),
+      sb.from("tasks").select("*").lt("date",range.start).not("recurrence","is",null),
+      sb.from("tasks").select("*").lt("date",range.start).eq("status","open").is("recurrence",null),
       sb.from("task_requests").select("*").eq("to_user_id",state.user.id).eq("status","pending").order("created_at",{ascending:false}),
       sb.from("task_requests").select("*").eq("from_user_id",state.user.id).order("created_at",{ascending:false}).limit(50),
       sb.from("task_templates").select("*").eq("user_id",state.user.id).order("created_at",{ascending:false}),
-      sb.from("time_logs").select("*").eq("user_id",state.user.id).gte("started_at",cutoff.toISOString()).order("started_at",{ascending:false}),
+      sb.from("time_logs").select("*").eq("user_id",state.user.id).or(`and(started_at.gte.${logStart.toISOString()},started_at.lt.${logEnd.toISOString()}),ended_at.is.null`).order("started_at",{ascending:false}),
       sb.from("friendships").select("user_a,user_b").or(`user_a.eq.${state.user.id},user_b.eq.${state.user.id}`),
       sb.from("friend_requests").select("id,from_user_id,to_user_id,status,created_at").eq("to_user_id",state.user.id).eq("status","pending").order("created_at",{ascending:false}),
       sb.from("friend_requests").select("id,from_user_id,to_user_id,status,created_at").eq("from_user_id",state.user.id).eq("status","pending").order("created_at",{ascending:false}),
@@ -432,18 +530,70 @@
     const friendIds=(friendRows||[]).map(r=>r.user_a===state.user.id?r.user_b:r.user_a);
     const requesterIds=(friendRequests||[]).map(r=>r.from_user_id);
     const profileIds=[...new Set([...friendIds,...requesterIds])];
-    const {data:friendProfiles}=profileIds.length?await sb.from("profiles").select("id,display_name,username").in("id",profileIds):{data:[]};
-    const allErr=tasksErr||reqErr||sentReqErr||tplErr||logsErr||friendsErr||friendReqErr||sentFriendReqErr||scheduleErr;
+    const {data:friendProfiles,error:profileErr}=profileIds.length?
+      await sb.from("public_profiles").select("id,display_name,username").in("id",profileIds):{data:[],error:null};
+    const allErr=windowErr||recurringErr||openErr||reqErr||sentReqErr||tplErr||logsErr||friendsErr||friendReqErr||sentFriendReqErr||scheduleErr||profileErr;
     if(completionErr)console.warn("Для серии выполнений нужна MIGRATION_2_0.sql",completionErr.message);
-    if(allErr){console.error("reloadCloud error",allErr);toast(`Ошибка загрузки: ${allErr.message}`)}
-    state.tasks=tasks||[];state.requests=requests||[];state.sentRequests=sentRequests||[];state.templates=templates||[];state.timeLogs=logs||[];
+    if(allErr){console.error("reloadCloud error",allErr);toast(`Ошибка загрузки: ${allErr.message}`);return}
+    const uniqTasks=new Map();
+    for(const t of [...(windowTasks||[]),...(olderRecurring||[]),...(olderOpen||[])])uniqTasks.set(t.id,t);
+    state.tasks=[...uniqTasks.values()].sort((a,b)=>a.date.localeCompare(b.date)||String(a.start_time||"").localeCompare(String(b.start_time||"")));
+    state.taskRange=range;
+    state.requests=requests||[];state.sentRequests=sentRequests||[];state.templates=templates||[];state.timeLogs=logs||[];
     state.friends=(friendProfiles||[]).filter(p=>friendIds.includes(p.id));
     state.__profiles=friendProfiles||[];
-    state.friendRequests=friendRequests||[];state.sentFriendRequests=sentFriendRequests||[];state.schedule=schedule||[];
-    state.completionDays=(completionRows||[]).map(row=>row.day);
+    state.friendRequests=friendRequests||[];state.sentFriendRequests=sentFriendRequests||[];
+    state.personalSchedule=schedule||[];
+    state.schedule=combineSchedules();
+    await fetchClassContext(state.personalSchedule);
+    if(!completionErr)state.completionDays=(completionRows||[]).map(row=>row.day);
+    state.lastFullRefresh=Date.now();
+    state.needsReload=false;
     restoreActiveTimer();scheduleNotifications();
     $("requestBadge").textContent=state.requests.length;$("requestBadge").classList.toggle("hidden",!state.requests.length);
     if($("friendBadge")){ $("friendBadge").textContent=state.friendRequests.length;$("friendBadge").classList.toggle("hidden",!state.friendRequests.length); }
+  }
+
+  // Navigation beyond the current query window fetches the requested dates.
+  async function ensureVisibleRange(){
+    if(state.demo||!state.user)return;
+    if(state.cloudReloadPromise)await state.cloudReloadPromise;
+    const day=iso(selectedDate()),range=state.taskRange;
+    const nearEdge=!range||day<range.start||day>range.end||
+      (new Date(day+"T00:00:00")-new Date(range.start+"T00:00:00"))/86400000<10||
+      (new Date(range.end+"T00:00:00")-new Date(day+"T00:00:00"))/86400000<10;
+    if(!nearEdge)return;
+    await reloadCloud();
+    if(state.section==="week")renderWeek();
+    if(state.section==="stats")renderStats();
+  }
+
+  // Poll only actionable requests. Reload the remaining datasets if something changed.
+  async function pollChanges(){
+    if(state.demo||!state.user||document.visibilityState==="hidden"||state.cloudReloadPromise)return;
+    const userId=state.user.id;
+    const [{data:incoming,error:inErr},{data:sent,error:sErr},{data:friendRequests,error:fErr},{data:classStamp,error:classErr}]=await Promise.all([
+      sb.from("task_requests").select("id,status,created_at").eq("to_user_id",userId).eq("status","pending").order("created_at",{ascending:false}),
+      sb.from("task_requests").select("id,status,created_at").eq("from_user_id",userId).order("created_at",{ascending:false}).limit(50),
+      sb.from("friend_requests").select("id,from_user_id,status").eq("to_user_id",userId).eq("status","pending"),
+      state.classGroup?sb.from("class_groups").select("schedule_updated_at").eq("id",state.classGroup.id).maybeSingle():Promise.resolve({data:null,error:null})
+    ]);
+    if(inErr||sErr||fErr||classErr)return;
+    const signature=a=>JSON.stringify((a||[]).map(r=>`${r.id}:${r.status}`).sort());
+    const changed=signature(incoming)!==signature(state.requests)||
+      signature(sent)!==signature(state.sentRequests)||signature(friendRequests)!==signature(state.friendRequests)||
+      !!(classStamp&&classStamp.schedule_updated_at!==state.classGroup?.schedule_updated_at);
+    if(!changed)return;
+    const beforeIncoming=state.requests.length;
+    const prior=new Map(state.sentRequests.map(r=>[r.id,r.status]));
+    await reloadCloud();renderAll();
+    if("Notification" in window&&Notification.permission==="granted"&&notificationSettings().enabled){
+      if(state.requests.length>beforeIncoming)new Notification("week.",{body:"Новое предложение задачи",tag:"week-request"});
+      for(const r of state.sentRequests){
+        const old=prior.get(r.id);
+        if(old&&old!==r.status)new Notification("week.",{body:r.status==="accepted"?"Предложение принято":r.status==="rejected"?"Предложение отклонено":"Предложение обновлено",tag:`week-request-${r.id}`});
+      }
+    }
   }
 
   function setupRealtimeNotifications(){
@@ -456,6 +606,10 @@
         const body=n.body||"Новое событие";
         toast(body);
         if("Notification" in window && Notification.permission==="granted" && notificationSettings().enabled && document.visibilityState!=="visible")new Notification(n.title||"week.",{body,tag:`week-event-${n.id}`});
+        if(document.visibilityState==="hidden"){
+          state.needsReload=true;
+          return;
+        }
         await reloadCloud();
         renderAll();
       }).subscribe();
@@ -464,7 +618,7 @@
 
   function bindStatic(){
     bindTimelineActions();
-    qsa("[data-auth]").forEach(b=>b.onclick=()=>{state.authMode=b.dataset.auth;qsa("[data-auth]").forEach(x=>x.classList.toggle("active",x===b));$("nameField").classList.toggle("hidden",state.authMode!=="signup");$("authSubmit").textContent=state.authMode==="signup"?"Создать аккаунт":"Войти"});
+    qsa("[data-auth]").forEach(b=>b.onclick=()=>{state.authMode=b.dataset.auth;qsa("[data-auth]").forEach(x=>x.classList.toggle("active",x===b));$("nameField").classList.toggle("hidden",state.authMode!=="signup");$("signupClassField").classList.toggle("hidden",state.authMode!=="signup");$("authSubmit").textContent=state.authMode==="signup"?"Создать аккаунт":"Войти"});
     $("authForm").onsubmit=authSubmit;
     $("demoBtn").onclick=()=>{state.demo=true;state.user=demoData.profiles[0];state.profile=state.user;loadDemo();showApp();toast("Открыт демо-режим")};
     $("logoutBtn").onclick=logout;
@@ -473,6 +627,15 @@
     $("mobileSettingsBtn").onclick=()=>switchSection("settings");
     qsa(".nav-btn").forEach(b=>b.onclick=()=>switchSection(b.dataset.section));
     $("friendSearchForm").onsubmit=searchFriend;
+    $("classJoinForm").onsubmit=joinClass;
+    $("classCreateForm").onsubmit=createClass;
+    $("adminClassSelect").onchange=async e=>{state.adminClassId=e.target.value||null;$("classCodeBox").classList.add("hidden");await reloadCloud();renderAll()};
+    $("classRotateCode").onclick=rotateClassCode;
+    $("classCopyCode").onclick=async()=>{if(!state.lastClassCode)return;try{await navigator.clipboard.writeText(state.lastClassCode);toast("Код скопирован")}catch{toast("Выдели код и скопируй вручную")}};
+    $("classEditSchedule").onclick=openClassScheduleEditor;
+    $("classAddLesson").onclick=()=>addClassLessonRow();
+    $("classCancelSchedule").onclick=()=>$("classScheduleEditor").classList.add("hidden");
+    $("classSaveSchedule").onclick=saveClassSchedule;
     $("onboardingForm").onsubmit=finishOnboarding;
     $("onboardingNext").onclick=onboardingNext;
     $("onboardingBack").onclick=onboardingBack;
@@ -535,7 +698,13 @@
     e.preventDefault();
     const email=$("email").value.trim(),password=$("password").value,displayName=$("displayName").value.trim();
     if(state.authMode==="signup"){
-      const {data,error}=await sb.auth.signUp({email,password,options:{data:{display_name:displayName||email.split("@")[0],username:normalizeUsername(displayName||email.split("@")[0])}}});
+      const classCode=$("signupClassCode").value.trim();
+      if(classCode){
+        const {data:className,error:codeError}=await sb.rpc("week_check_class_code",{p_code:classCode});
+        if(codeError){toast("Не удалось проверить код класса. Проверь MIGRATION_2_2_CLASSES.sql");return}
+        if(!className){toast("Код класса не найден. Проверь его у администратора");return}
+      }
+      const {data,error}=await sb.auth.signUp({email,password,options:{data:{display_name:displayName||email.split("@")[0],username:normalizeUsername(displayName||email.split("@")[0]),...(classCode?{class_invite_code:classCode}:{})}}});
       if(error){toast(error.message);return}
       toast(data.session?"Аккаунт создан":"Проверь почту для подтверждения");
     }else{
@@ -548,6 +717,7 @@
   const sectionHeaders={
     requests:["Предложения","Новые задачи от друзей и ответы на твои предложения"],
     friends:["Друзья","Люди, с которыми удобно строить общие планы"],
+    classes:["Группы","Классы, расписание уроков и одноклассники"],
     templates:["Частые задачи","Твои шаблоны для быстрого планирования"],
     stats:["Статистика","Посмотри, как проходит твоя неделя"],
     profile:["Мой профиль","Личные данные и твоё расписание"],
@@ -568,10 +738,11 @@
     $("profileBtn").setAttribute("aria-pressed",String(s==="profile"));
     $("settingsBtn").setAttribute("aria-pressed",String(s==="settings"));
     $("mobileSettingsBtn").setAttribute("aria-pressed",String(s==="settings"));
-    ["week","requests","friends","templates","stats","profile","settings"].forEach(x=>$(`${x}Section`).classList.toggle("hidden",x!==s));
+    ["week","requests","friends","classes","templates","stats","profile","settings"].forEach(x=>$(`${x}Section`).classList.toggle("hidden",x!==s));
     if(s==="week")renderWeek();
     if(s==="requests")renderRequests();
     if(s==="friends")renderFriends();
+    if(s==="classes")renderClasses();
     if(s==="templates")renderTemplates();
     if(s==="stats")renderStats();
     if(s==="profile")renderProfile();
@@ -588,14 +759,14 @@
     toast("Расписание можно заполнить позже в профиле");
   };
   function openOnboarding(){
-    state.onboardingStep=1;
+    state.onboardingStep=state.classGroup?3:1;
     const school=state.profile?.studies_at_school===true?"yes":state.profile?.studies_at_school===false?"no":"";
     const hasExtra=(state.schedule||[]).some(x=>x.kind==="extra");
-    qsa('input[name="school"]').forEach(x=>x.checked=x.value===school);
+    qsa('input[name="school"]').forEach(x=>x.checked=x.value===(state.classGroup?"yes":school));
     qsa('input[name="extras"]').forEach(x=>x.checked=x.value===(hasExtra?"yes":state.profile?.onboarding_completed?"no":""));
     $("schoolScheduleList").innerHTML=""; $("extraScheduleList").innerHTML="";
-    (state.schedule||[]).filter(x=>x.kind==="school").forEach(x=>addScheduleEditorRow("school",x));
-    (state.schedule||[]).filter(x=>x.kind==="extra").forEach(x=>addScheduleEditorRow("extra",x));
+    (state.classGroup?[]:state.personalSchedule||[]).filter(x=>x.kind==="school").forEach(x=>addScheduleEditorRow("school",x));
+    (state.personalSchedule||[]).filter(x=>x.kind==="extra").forEach(x=>addScheduleEditorRow("extra",x));
     updateScheduleEmpty("school");updateScheduleEmpty("extra");
     $("onboardingModal").classList.remove("hidden");updateOnboardingUI();
   }
@@ -604,7 +775,7 @@
     const step=state.onboardingStep;
     qsa(".onboarding-step").forEach(x=>x.classList.toggle("hidden",Number(x.dataset.step)!==step));
     qsa("#onboardingProgress span").forEach((x,i)=>x.classList.toggle("active",i<step));
-    $("onboardingBack").classList.toggle("hidden",step===1);
+    $("onboardingBack").classList.toggle("hidden",step===1||(state.classGroup&&step===3));
     $("onboardingNext").classList.toggle("hidden",step===4);
     $("onboardingFinish").classList.toggle("hidden",step!==4);
     $("onboardingTitle").textContent=step===1?"Расскажем week. о твоём расписании":step===2?"Школьное расписание":step===3?"Дополнительные занятия":"Расписание дополнительных занятий";
@@ -650,7 +821,7 @@
   }
   function onboardingBack(){
     if(state.onboardingStep===4)state.onboardingStep=3;
-    else if(state.onboardingStep===3)state.onboardingStep=selectedRadio("school")==="yes"?2:1;
+    else if(state.onboardingStep===3)state.onboardingStep=state.classGroup?3:selectedRadio("school")==="yes"?2:1;
     else if(state.onboardingStep===2)state.onboardingStep=1;
     updateOnboardingUI();
   }
@@ -658,10 +829,10 @@
     e?.preventDefault();
     const school=selectedRadio("school"),extras=selectedRadio("extras");
     if(!school)return onboardingBack();
-    if(school==="yes"&&!collectSchedule("school").length){state.onboardingStep=2;updateOnboardingUI();return toast("Добавь хотя бы один школьный урок");}
+    if(!state.classGroup&&school==="yes"&&!collectSchedule("school").length){state.onboardingStep=2;updateOnboardingUI();return toast("Добавь хотя бы один школьный урок");}
     if(!extras){state.onboardingStep=3;updateOnboardingUI();return toast("Выбери вариант про дополнительные занятия");}
     if(extras==="yes"&&!collectSchedule("extra").length){state.onboardingStep=4;updateOnboardingUI();return toast("Добавь хотя бы одно дополнительное занятие");}
-    const items=[...collectSchedule("school"),...collectSchedule("extra")];
+    const items=[...(state.classGroup?[]:collectSchedule("school")),...collectSchedule("extra")];
     if(state.demo){
       demoData.schedules=(demoData.schedules||[]).filter(x=>x.user_id!==currentUserId());
       demoData.schedules.push(...items.map(x=>({...x,id:uid(),user_id:currentUserId()})));
@@ -672,7 +843,7 @@
       if(items.length){const ins=await sb.from("schedule_items").insert(items.map(x=>({...x,user_id:state.user.id})));if(ins.error)return toast(ins.error.message);}
       const up=await sb.from("profiles").update({onboarding_completed:true,studies_at_school:school==="yes"}).eq("id",state.user.id).select().single();
       if(up.error)return toast(up.error.message);
-      state.profile=up.data;state.schedule=items.map(x=>({...x,user_id:state.user.id}));
+      state.profile=up.data;state.personalSchedule=items.map(x=>({...x,user_id:state.user.id}));state.schedule=combineSchedules();
     }
     $("onboardingModal").classList.add("hidden");renderAll();toast("Расписание сохранено");
   }
@@ -681,7 +852,8 @@
     $("profileName").textContent=state.profile?.display_name||"Пользователь";
     $("profileEmail").textContent=state.profile?.email||state.user?.email||"";
     $("avatar").textContent=(state.profile?.display_name||"П").slice(0,1).toUpperCase();
-    renderWeek();renderRequests();renderFriends();renderTemplates();renderStats();renderProfile();renderSettings();updateTimerBar();updateSectionHeader();
+    if($("profileScheduleHint"))$("profileScheduleHint").textContent=state.classGroup?"Уроки назначает администратор класса. Здесь редактируются твои дополнительные занятия.":"Уроки и дополнительные занятия, которые week. учитывает при планировании.";
+    renderWeek();renderRequests();renderFriends();renderClasses();renderTemplates();renderStats();renderProfile();renderSettings();updateTimerBar();updateSectionHeader();
   }
 
   function visibleTasks(){
@@ -692,8 +864,8 @@
 
   function selectedDate(){return new Date(state.currentDate.getFullYear(),state.currentDate.getMonth(),state.currentDate.getDate())}
   function syncWeekStart(){state.weekStart=startOfWeek(selectedDate())}
-  function moveDay(delta){state.currentDate.setDate(state.currentDate.getDate()+delta);syncWeekStart();renderWeek();renderStats()}
-  function goToday(){state.currentDate=new Date();syncWeekStart();renderWeek();renderStats()}
+  function moveDay(delta){state.currentDate.setDate(state.currentDate.getDate()+delta);syncWeekStart();renderWeek();renderStats();void ensureVisibleRange()}
+  function goToday(){state.currentDate=new Date();syncWeekStart();renderWeek();renderStats();void ensureVisibleRange()}
   function isToday(ds){return ds===iso(new Date())}
   function dayTitle(ds){
     const d=new Date(ds+"T00:00:00");
@@ -835,7 +1007,7 @@
   }
   window.selectCalendarDay=ds=>{
     state.currentDate=new Date(ds+"T00:00:00");state.calendarView="day";
-    localStorage.setItem("week-calendar-view","day");renderWeek();renderStats();
+    localStorage.setItem("week-calendar-view","day");renderWeek();renderStats();void ensureVisibleRange();
   };
   window.openTaskForDate=ds=>{openTask();$("taskDate").value=ds;updateConflictWarning()};
 
@@ -1118,6 +1290,24 @@
     };
     if(!base.title)return;
     base.checklist=collectChecklist();
+    // If a date is typed manually outside the cached period, load its tasks
+    // before running the overlap check. Otherwise conflicts could be missed.
+    if(!state.demo && dest!=="proposal" && base.date){
+      const range=state.taskRange;
+      const until=new Date(base.date+"T00:00:00");
+      if(base.recurrence)until.setDate(until.getDate()+35);
+      const endDate=iso(until);
+      if(!range||base.date<range.start||endDate>range.end){
+        const [{data:atDate,error:atErr},{data:oldSeries,error:seriesErr}]=await Promise.all([
+          sb.from("tasks").select("*").gte("date",base.date).lte("date",endDate),
+          sb.from("tasks").select("*").lt("date",base.date).not("recurrence","is",null)
+        ]);
+        if(atErr||seriesErr){toast("Не удалось проверить календарь. Повтори сохранение позже.");return}
+        const merged=new Map(state.tasks.map(t=>[t.id,t]));
+        for(const t of [...(atDate||[]),...(oldSeries||[])])merged.set(t.id,t);
+        state.tasks=[...merged.values()];
+      }
+    }
     const overlaps=taskConflicts(base,id);
     if(overlaps.length&&!$("taskConflictOverride").checked){
       updateConflictWarning();$("taskConflictWarning").scrollIntoView({behavior:"smooth",block:"nearest"});
@@ -1154,6 +1344,7 @@
     if(dest!=="proposal"){
       state.currentDate=new Date(base.date+"T00:00:00");
       state.weekStart=startOfWeek(state.currentDate);
+      if(!state.demo)await ensureVisibleRange();
     }
     $("taskModal").classList.add("hidden");renderAll();toast(id?"Задача обновлена":dest==="proposal"?"Предложение отправлено":"Задача создана");
   }
@@ -1237,7 +1428,7 @@
       $("friendSearchResult").innerHTML=found?`<div class="friend-result"><div><strong>${esc(found.display_name)}</strong><div class="small muted">@${esc(found.username||username)}</div></div><button class="primary" onclick="window.demoAddFriend('${found.id}')">Добавить</button></div>`:'<p class="muted small">Пользователь не найден.</p>';
       return;
     }
-    const {data,error}=await sb.from("profiles").select("id,display_name,username").eq("username",username).neq("id",state.user.id).maybeSingle();
+    const {data,error}=await sb.from("public_profiles").select("id,display_name,username").eq("username",username).neq("id",state.user.id).maybeSingle();
     if(error){toast(error.message);return}
     if(!data){$("friendSearchResult").innerHTML='<p class="muted small">Пользователь не найден.</p>';return}
     if(friendById(data.id)){$("friendSearchResult").innerHTML='<p class="muted small">Этот пользователь уже у тебя в друзьях.</p>';return}
@@ -1262,7 +1453,7 @@
         else toast(error.message);
         await reloadCloud();renderFriends();return;
       }
-      await reloadCloud();renderFriends();toast("Заявка отправлена");
+      await reloadCloud();renderFriends();renderClasses();toast("Заявка отправлена");
     }finally{state.sendingFriendIds.delete(id);}
   };
   window.demoAddFriend=id=>{
@@ -1274,7 +1465,7 @@
     const r=state.friendRequests.find(x=>x.id===id);if(!r)return;
     if(state.demo){window.demoAddFriend(r.from_user_id);demoData.friendRequests=(demoData.friendRequests||[]).filter(x=>x.id!==id);saveDemo();loadDemo()}
     else{const {error}=await sb.from("friend_requests").update({status:"accepted"}).eq("id",id).eq("to_user_id",state.user.id);if(error){toast(error.message);return}await reloadCloud()}
-    renderFriends();toast("Заявка принята");
+    renderFriends();renderClasses();toast("Заявка принята");
   };
   window.rejectFriend=async id=>{
     const r=state.friendRequests.find(x=>x.id===id);if(!r)return;
@@ -1300,6 +1491,133 @@
     }
     renderAll();toast("Друг удалён");
   };
+  // Classes: code issuance and schedule writes are verified by Supabase RPC, not by the UI.
+  function classCodeMessage(code){
+    state.lastClassCode=code;
+    $("classInviteCode").textContent=code;
+    $("classCodeBox").classList.remove("hidden");
+  }
+  async function joinClass(e){
+    e.preventDefault();
+    const code=$("classJoinCode").value.trim();
+    if(!code)return;
+    if(state.demo){
+      const group=(demoData.classGroups||[]).find(g=>g.invite_code.replaceAll("-","")===code.replaceAll("-","").toUpperCase());
+      if(!group){toast("Неверный код класса");return}
+      if((demoData.classMemberships||[]).some(m=>m.user_id===currentUserId()&&m.class_id!==group.id)){toast("Ты уже состоишь в другом классе");return}
+      demoData.classMemberships||=[];
+      if(!demoData.classMemberships.some(m=>m.user_id===currentUserId()))demoData.classMemberships.push({class_id:group.id,user_id:currentUserId()});
+      saveDemo();loadDemo();renderAll();toast("Ты вступил в класс");return;
+    }
+    const {error}=await sb.rpc("week_join_class",{p_code:code});
+    if(error){toast(error.message);return}
+    $("classJoinCode").value="";
+    await reloadCloud();renderAll();toast("Ты вступил в класс");
+  }
+  async function createClass(e){
+    e.preventDefault();
+    if(!state.isWeekAdmin)return toast("Нет прав администратора");
+    const name=$("classCreateName").value.trim();if(!name)return;
+    if(state.demo){
+      const raw=Array.from({length:24},()=>Math.floor(Math.random()*16).toString(16)).join("").toUpperCase();
+      const code=raw.match(/.{1,6}/g).join("-");
+      const group={id:uid(),name,invite_code:code};
+      demoData.classGroups||=[];demoData.classGroups.push(group);
+      state.adminClassId=group.id;saveDemo();loadDemo();classCodeMessage(code);renderAll();toast("Класс создан");return;
+    }
+    const {data,error}=await sb.rpc("week_create_class",{p_name:name});
+    if(error){toast(error.message);return}
+    const result=Array.isArray(data)?data[0]:data;
+    if(!result?.class_id)return toast("Не получен ответ от базы");
+    state.adminClassId=result.class_id;
+    await reloadCloud();renderAll();classCodeMessage(result.invite_code);
+    $("classCreateName").value="";toast("Класс создан");
+  }
+  async function rotateClassCode(){
+    if(!state.isWeekAdmin||!state.classViewGroup)return;
+    if(!confirm("Старый код перестанет работать. Создать новый?"))return;
+    if(state.demo){
+      const raw=Array.from({length:24},()=>Math.floor(Math.random()*16).toString(16)).join("").toUpperCase();
+      const code=raw.match(/.{1,6}/g).join("-");
+      const group=demoData.classGroups.find(g=>g.id===state.classViewGroup.id);
+      group.invite_code=code;saveDemo();loadDemo();classCodeMessage(code);return;
+    }
+    const {data,error}=await sb.rpc("week_rotate_class_code",{p_class_id:state.classViewGroup.id});
+    if(error){toast(error.message);return}
+    classCodeMessage(data);toast("Код обновлён");
+  }
+  function addClassLessonRow(item={}){
+    const row=document.createElement("div");row.className="schedule-row";
+    const day=String(item.day_of_week??"1");
+    row.innerHTML=`<label>День<select data-field="day">${DAY_OPTIONS.map(([v,n])=>`<option value="${v}" ${v===day?"selected":""}>${n}</option>`).join("")}</select></label>
+      <label>Предмет<input data-field="title" maxlength="120" value="${esc(item.title||"")}" placeholder="Например, математика" required></label>
+      <label>Начало<input type="time" data-field="start" value="${esc(String(item.start_time||"").slice(0,5))}" required></label>
+      <label>Конец<input type="time" data-field="end" value="${esc(String(item.end_time||"").slice(0,5))}" required></label>
+      <button type="button" class="schedule-remove" aria-label="Удалить урок">×</button>`;
+    row.querySelector(".schedule-remove").onclick=()=>row.remove();
+    $("classScheduleRows").appendChild(row);
+  }
+  function openClassScheduleEditor(){
+    if(!state.isWeekAdmin||!state.classViewGroup)return;
+    $("classScheduleRows").innerHTML="";
+    (state.classViewSchedule||[]).forEach(addClassLessonRow);
+    $("classScheduleEditor").classList.remove("hidden");
+  }
+  async function saveClassSchedule(){
+    if(!state.isWeekAdmin||!state.classViewGroup)return;
+    const items=[...$("classScheduleRows").querySelectorAll(".schedule-row")].map(row=>({
+      day_of_week:Number(row.querySelector('[data-field="day"]').value),
+      title:row.querySelector('[data-field="title"]').value.trim(),
+      start_time:row.querySelector('[data-field="start"]').value,
+      end_time:row.querySelector('[data-field="end"]').value
+    }));
+    if(items.length>70||items.some(x=>!x.title||x.title.length>120||!x.start_time||!x.end_time||x.end_time<=x.start_time))
+      return toast("Проверь названия, время уроков и лимит 70 записей");
+    if(state.demo){
+      demoData.classSchedules=(demoData.classSchedules||[]).filter(s=>s.class_id!==state.classViewGroup.id);
+      demoData.classSchedules.push(...items.map(x=>({...x,class_id:state.classViewGroup.id,id:uid()})));
+      saveDemo();loadDemo();$("classScheduleEditor").classList.add("hidden");renderAll();toast("Расписание сохранено");return;
+    }
+    const {error}=await sb.rpc("week_replace_class_schedule",{p_class_id:state.classViewGroup.id,p_items:items});
+    if(error){toast(error.message);return}
+    await reloadCloud();$("classScheduleEditor").classList.add("hidden");renderAll();toast("Расписание сохранено для всего класса");
+  }
+  function renderClasses(){
+    const admin=state.isWeekAdmin, mine=state.classGroup, group=state.classViewGroup;
+    $("classAdminPanel").classList.toggle("hidden",!admin);
+    $("classJoinPanel").classList.toggle("hidden",!!mine);
+    $("classInfo").classList.toggle("hidden",!mine);
+    if(mine)$("className").textContent=mine.name;
+    if(admin){
+      const picker=$("adminClassSelect");
+      picker.innerHTML=state.adminGroups.length?state.adminGroups.map(g=>`<option value="${g.id}" ${g.id===group?.id?"selected":""}>${esc(g.name)}</option>`).join(""):'<option value="">Классы ещё не созданы</option>';
+      $("classRotateCode").disabled=!group;
+    }
+    $("classContent").classList.toggle("hidden",!group);
+    if(!group)return;
+    const days=[1,2,3,4,5,6,0];
+    const items=state.classViewSchedule||[];
+    $("classScheduleList").innerHTML=items.length?days.map(day=>{
+      const own=items.filter(i=>Number(i.day_of_week)===day);
+      if(!own.length)return "";
+      const label=DAY_OPTIONS.find(x=>Number(x[0])===day)?.[1]||"";
+      return `<div class="class-day"><strong>${label}</strong><div>${own.map(i=>`<div class="class-lesson"><span>${esc(String(i.start_time).slice(0,5))}–${esc(String(i.end_time).slice(0,5))}</span><b>${esc(i.title)}</b></div>`).join("")}</div></div>`;
+    }).join(""):'<p class="small muted">Расписание ещё не заполнено.</p>';
+    $("classEditSchedule").classList.toggle("hidden",!admin);
+    const rows=state.classMembers||[];
+    $("classMembersList").innerHTML=rows.length?rows.map(f=>{
+      let action="";
+      if(f.id===currentUserId())action='<span class="small muted">Это ты</span>';
+      else if(friendById(f.id))action='<span class="small muted">В друзьях</span>';
+      else{
+        const incoming=state.friendRequests.find(r=>r.from_user_id===f.id),outgoing=state.sentFriendRequests.some(r=>r.to_user_id===f.id);
+        action=incoming?`<button class="primary" onclick="window.acceptFriend('${incoming.id}')">Принять</button>`:
+          outgoing?'<span class="small muted">Заявка отправлена</span>':`<button class="secondary" onclick="window.sendFriendRequest('${f.id}')">+ В друзья</button>`;
+      }
+      return `<div class="friend-row"><div class="avatar mini">${esc((f.display_name||"П").slice(0,1).toUpperCase())}</div><div class="class-member-name"><strong>${esc(f.display_name)}</strong><div class="small muted">@${esc(f.username||"")}</div></div><div class="actions">${action}</div></div>`;
+    }).join(""):'<p class="small muted">Пока участников нет.</p>';
+  }
+
   function renderFriends(){
     const list=$("friendsList"), req=$("friendRequestsList"), sent=$("sentFriendRequestsList");
     list.innerHTML=state.friends.length?state.friends.map(f=>`<div class="friend-row"><div class="avatar mini">${esc((f.display_name||"П").slice(0,1).toUpperCase())}</div><div><strong>${esc(f.display_name)}</strong><div class="small muted">@${esc(f.username||"")}</div></div><div class="actions"><button class="secondary" onclick="window.unfriend('${f.id}')">Удалить</button></div></div>`).join(""):'<p class="muted small">Пока нет друзей.</p>';
@@ -1448,7 +1766,15 @@
     const file=e.target.files[0];if(!file)return;const reader=new FileReader();reader.onload=()=>{try{const data=JSON.parse(reader.result);if(Array.isArray(data.tasks)){demoData.tasks.push(...data.tasks);saveDemo();loadDemo();renderAll();toast("Импортировано")}else toast("Неверный файл")}catch{toast("Не удалось прочитать JSON")}};reader.readAsText(file);
   }
 
-  setInterval(async()=>{if(!state.demo && state.user){const beforeIncoming=state.requests.length;const beforeStatuses=new Map((state.sentRequests||[]).map(r=>[r.id,r.status]));await reloadCloud();if(state.requests.length>beforeIncoming && "Notification" in window && Notification.permission==="granted" && notificationSettings().enabled)new Notification("week.",{body:"Новое предложение задачи",tag:"week-request"});for(const r of state.sentRequests||[]){const old=beforeStatuses.get(r.id);if(old&&old!==r.status){const name=r.status==="accepted"?"Предложение принято":r.status==="rejected"?"Предложение отклонено":"Предложение обновлено";if("Notification" in window && Notification.permission==="granted" && notificationSettings().enabled)new Notification("week.",{body:name,tag:`week-request-${r.id}`});}}renderRequests();renderWeek();}},60000);
+  // Lightweight 3-minute polling, suspended while the tab is hidden.
+  setInterval(()=>{void pollChanges()},180000);
+  async function refreshAfterReturn(){
+    if(state.demo||!state.user||document.visibilityState==="hidden")return;
+    if(!state.needsReload&&Date.now()-(state.lastFullRefresh||0)<90000)return;
+    await reloadCloud();renderAll();
+  }
+  document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")void refreshAfterReturn()});
+  window.addEventListener("online",()=>{void refreshAfterReturn()});
   applyTheme(localStorage.getItem("week-theme")||APP_CFG.theme||"system");
   if(window.matchMedia){window.matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change",()=>{if((localStorage.getItem("week-theme")||APP_CFG.theme)==="system")applyTheme("system")})}
   boot();

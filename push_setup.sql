@@ -111,16 +111,34 @@ end; $$;
 drop trigger if exists task_request_status_notification on public.task_requests;
 create trigger task_request_status_notification after update of status on public.task_requests for each row execute function public.notify_task_request_status();
 
+-- Общие задачи: уведомляем участников конкретной задачи, а не случайный аккаунт.
 create or replace function public.notify_shared_task_done()
-returns trigger language plpgsql security definer set search_path = public as $$
-declare recipient uuid; actor_name text;
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare recipient uuid;
+        actor uuid;
+        actor_name text;
 begin
-  if NEW.visibility<>'shared' or OLD.status='done' or NEW.status<>'done' then return NEW; end if;
-  select id into recipient from public.profiles where id<>NEW.owner_id order by created_at limit 1;
-  select display_name into actor_name from public.profiles where id=NEW.owner_id;
-  perform public.create_week_notification(recipient,NEW.owner_id,'shared_task_done','Общая задача выполнена',coalesce(actor_name,'Пользователь') || ' выполнил(а): ' || NEW.title,jsonb_build_object('task_id',NEW.id));
+  if NEW.visibility <> 'shared' or OLD.status = 'done' or NEW.status <> 'done' then return NEW; end if;
+  actor := coalesce(auth.uid(), NEW.owner_id);
+  select display_name into actor_name from public.profiles where id = actor;
+  for recipient in
+    select tm.user_id from public.task_members tm
+    where tm.task_id = NEW.id and tm.user_id <> actor
+  loop
+    perform public.create_week_notification(
+      recipient, actor, 'shared_task_done', 'Общая задача выполнена',
+      coalesce(actor_name, 'Пользователь') || ' выполнил(а): ' || NEW.title,
+      jsonb_build_object('task_id', NEW.id)
+    );
+  end loop;
   return NEW;
-end; $$;
+end;
+$$;
+
 drop trigger if exists shared_task_done_notification on public.tasks;
 create trigger shared_task_done_notification after update of status on public.tasks for each row execute function public.notify_shared_task_done();
 

@@ -528,3 +528,44 @@ html[data-theme="dark"] .gap-add-button{background:#292e36;color:#d6cee5;border-
   /* Sheets may expand, but their close buttons must stay below the top safe area. */
   .modal-card{max-height:calc(100dvh - var(--week-safe-top) - 14px)}
 }
+
+
+/* week. 2.2: школьные классы */
+.classes-panel{max-width:1000px}
+.class-join-panel,.class-admin-panel{padding:18px;background:var(--soft);border:1px solid var(--line);border-radius:17px;margin:16px 0}
+.class-join-panel h3,.class-admin-panel h3{margin:0 0 8px}
+.class-join-form{display:flex;gap:10px;margin:12px 0;align-items:stretch}
+.class-join-form input{flex:1;min-width:0}
+.class-identity{display:flex;align-items:center;justify-content:space-between;padding:16px 18px;border-radius:17px;background:var(--surface2);border:1px solid var(--line)}
+.class-identity h3{font-size:26px;margin:0}
+.class-symbol{font-size:27px;color:#a58adb}
+.class-admin-panel>label{margin-top:14px}
+.class-code-box{display:flex;align-items:center;gap:14px;justify-content:space-between;flex-wrap:wrap;border:1px solid var(--line);border-radius:14px;background:var(--surface);padding:14px;margin:13px 0}
+.class-code-box p{margin:5px 0 10px}
+.class-code-box code{font-size:16px;color:var(--text);letter-spacing:.055em;overflow-wrap:anywhere;font-weight:750}
+.class-heading{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:12px 0}
+.class-heading h3{margin:0}
+.class-day{display:grid;grid-template-columns:48px 1fr;gap:12px;margin:15px 0;align-items:start}
+.class-day>strong{padding-top:12px;color:var(--muted);font-size:13px}
+.class-day>div{display:grid;gap:7px}
+.class-lesson{display:flex;align-items:center;gap:16px;background:var(--surface2);padding:11px 13px;border-radius:12px;border:1px solid var(--line)}
+.class-lesson span{min-width:90px;color:var(--muted);font-size:12px}
+.class-lesson b{font-weight:650;font-size:14px}
+.class-editor-actions{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
+#classScheduleEditor{margin:20px 0;padding:15px;border:1px solid var(--line);border-radius:16px}
+.class-member-name{flex:1;min-width:0}
+#classMembersList .friend-row .actions button{min-height:44px}
+@media(max-width:700px){
+  .sidebar nav{grid-template-columns:repeat(6,minmax(0,1fr));flex:6}
+  .sidebar .nav-btn{font-size:8.5px;padding:6px 0}
+  .sidebar .nav-btn span:first-child{font-size:16px}
+  .class-join-form{flex-direction:column}
+  .class-join-form button{min-height:44px}
+  .class-day{grid-template-columns:35px 1fr;gap:5px}
+  .class-lesson{flex-wrap:wrap;gap:5px;padding:10px}
+  .class-lesson span{min-width:100%}
+  .class-lesson b{font-size:13px}
+  .class-admin-panel,.class-join-panel{padding:13px}
+  #classMembersList .friend-row{gap:7px}
+  #classMembersList .friend-row .actions button{padding:7px 9px;font-size:12px}
+}

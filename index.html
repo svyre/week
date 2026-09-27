@@ -61,6 +61,7 @@
         <label>Email<input id="email" type="email" required placeholder="you@example.com"></label>
         <label>Пароль<input id="password" type="password" minlength="6" required placeholder="••••••••"></label>
         <label id="nameField" class="hidden">Имя<input id="displayName" placeholder="Например, Вадим"></label>
+        <label id="signupClassField" class="hidden">Код класса (необязательно)<input id="signupClassCode" autocomplete="off" maxlength="32" placeholder="Код от администратора"><span class="small muted">Если укажешь код, попадёшь в класс сразу после регистрации.</span></label>
         <button class="primary full" type="submit" id="authSubmit">Войти</button>
       </form>
       <p id="authHint" class="small muted">После регистрации проверь почту, если включено подтверждение email.</p>
@@ -78,6 +79,7 @@
         <button class="nav-btn active" data-section="week"><span>⌂</span><span>Сегодня</span></button>
         <button class="nav-btn" data-section="requests"><span>♡</span><span>Предложения</span><span id="requestBadge" class="badge hidden">0</span></button>
         <button class="nav-btn" data-section="friends"><span>♧</span><span>Друзья</span><span id="friendBadge" class="badge hidden">0</span></button>
+        <button class="nav-btn" data-section="classes"><span>▦</span><span>Группы</span></button>
         <button class="nav-btn" data-section="templates"><span>✦</span><span>Шаблоны</span></button>
         <button class="nav-btn" data-section="stats"><span>↗</span><span>Статистика</span></button>
       </nav>
@@ -148,6 +150,48 @@
         </div>
       </section>
 
+      <section id="classesSection" class="section hidden">
+        <div class="panel classes-panel">
+          <div class="panel-head"><div><h2>Классы</h2><p class="small muted">Участники класса и общее расписание уроков.</p></div></div>
+          <div id="classJoinPanel" class="class-join-panel hidden">
+            <h3>Присоединиться к классу</h3>
+            <p class="small muted">Введи код, который выдал администратор.</p>
+            <form id="classJoinForm" class="class-join-form">
+              <input id="classJoinCode" autocomplete="off" maxlength="32" placeholder="Код приглашения" required>
+              <button class="primary" type="submit">Вступить</button>
+            </form>
+          </div>
+          <div id="classInfo" class="hidden">
+            <div class="class-identity"><div><div class="eyebrow">Твой класс</div><h3 id="className"></h3></div><span class="class-symbol">▦</span></div>
+          </div>
+          <div id="classAdminPanel" class="class-admin-panel hidden">
+            <h3>Управление классами</h3>
+            <form id="classCreateForm" class="class-join-form">
+              <input id="classCreateName" maxlength="80" placeholder="Например, 10А" required>
+              <button class="primary" type="submit">Создать класс</button>
+            </form>
+            <label>Выбрать класс<select id="adminClassSelect"><option value="">Классы не созданы</option></select></label>
+            <div id="classCodeBox" class="class-code-box hidden">
+              <div><strong>Новый код приглашения</strong><p class="small muted">Скопируй и передай ученикам. После закрытия код можно только заменить новым.</p><code id="classInviteCode"></code></div>
+              <button id="classCopyCode" type="button" class="secondary">Копировать</button>
+            </div>
+            <button id="classRotateCode" type="button" class="secondary">Сгенерировать новый код для выбранного класса</button>
+          </div>
+          <div id="classContent" class="hidden">
+            <div class="friends-subsection"><div class="class-heading"><h3>Расписание уроков</h3><button id="classEditSchedule" type="button" class="secondary hidden">Редактировать</button></div>
+              <div id="classScheduleList"></div>
+            </div>
+            <div id="classScheduleEditor" class="hidden">
+              <h3>Редактор расписания</h3>
+              <p class="small muted">Изменения сразу применятся ко всем участникам этого класса.</p>
+              <div id="classScheduleRows" class="schedule-editor"></div>
+              <div class="class-editor-actions"><button id="classAddLesson" class="secondary" type="button">+ Урок</button><button id="classCancelSchedule" class="secondary" type="button">Отмена</button><button id="classSaveSchedule" class="primary" type="button">Сохранить расписание</button></div>
+            </div>
+            <div class="friends-subsection"><h3>Участники класса</h3><div id="classMembersList"></div></div>
+          </div>
+        </div>
+      </section>
+
       <section id="templatesSection" class="section hidden">
         <div class="panel">
           <div class="panel-head">
@@ -178,7 +222,7 @@
           <label>Username<input id="settingsUsername" placeholder="например vadim" maxlength="24" autocomplete="off"><span class="small muted">По нему тебя смогут найти друзья.</span></label>
           <button id="saveProfileBtn" class="primary">Сохранить профиль</button>
           <div class="settings-card">
-            <div><strong>Моё расписание</strong><p class="small muted">Уроки и дополнительные занятия, которые week. учитывает при планировании.</p></div>
+            <div><strong>Моё расписание</strong><p id="profileScheduleHint" class="small muted">Уроки и дополнительные занятия, которые week. учитывает при планировании.</p></div>
             <button id="editScheduleBtn" class="secondary">Изменить расписание</button>
           </div>
           <button id="logoutBtn" class="secondary profile-logout">Выйти из аккаунта</button>
