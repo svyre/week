@@ -296,3 +296,22 @@ html[data-theme="dark"] .profile-trigger:hover,html[data-theme="dark"] .profile-
   .sidebar [data-section="requests"] span:nth-child(2){font-size:0}
   .sidebar [data-section="requests"] span:nth-child(2)::after{content:"Заявки";font-size:9px}
 }
+
+
+/* week. 1.5: mobile settings above add, avatar last in bottom bar */
+.mobile-settings-top{display:none}
+@media(max-width:700px){
+  .topbar{align-items:flex-start}
+  .topbar>div:first-child{flex:1;min-width:0;padding-top:3px}
+  .top-actions{flex:0 0 46px;display:flex;flex-direction:column;align-items:center;gap:8px}
+  .top-actions .mobile-settings-top{display:grid;place-items:center;width:46px;height:42px;padding:0;border:1px solid var(--line);border-radius:14px;background:var(--surface);color:var(--text);font-size:25px;line-height:1;box-shadow:0 2px 8px #0000000c}
+  .top-actions .mobile-settings-top.active,.top-actions .mobile-settings-top:hover{background:var(--surface2);border-color:#a696ff}
+  .top-actions .mobile-settings-top:focus-visible{outline:3px solid #9875e0;outline-offset:2px}
+  .sidebar nav{flex:5;grid-template-columns:repeat(5,minmax(0,1fr));gap:2px}
+  .sidebar-bottom{flex:1;min-width:0;gap:0}
+  .sidebar-bottom .settings-gear{display:none}
+  .sidebar .sidebar-bottom .profile-box{display:flex;flex:1;min-width:0;align-items:center;justify-content:center;padding:5px 1px;gap:0;border:1px solid transparent}
+  .sidebar-bottom .avatar{width:32px;height:32px;min-width:32px;flex:0 0 32px;border-radius:11px;font-size:14px}
+  .profile-mobile-label{display:none}
+  .sidebar-bottom .profile-box.active{background:var(--surface2);border-color:var(--line)}
+}

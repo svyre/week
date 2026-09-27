@@ -450,6 +450,7 @@
     $("logoutBtn").onclick=logout;
     $("profileBtn").onclick=()=>switchSection("profile");
     $("settingsBtn").onclick=()=>switchSection("settings");
+    $("mobileSettingsBtn").onclick=()=>switchSection("settings");
     qsa(".nav-btn").forEach(b=>b.onclick=()=>switchSection(b.dataset.section));
     $("friendSearchForm").onsubmit=searchFriend;
     $("onboardingForm").onsubmit=finishOnboarding;
@@ -543,8 +544,10 @@
     qsa(".nav-btn").forEach(b=>b.classList.toggle("active",b.dataset.section===s));
     $("profileBtn").classList.toggle("active",s==="profile");
     $("settingsBtn").classList.toggle("active",s==="settings");
+    $("mobileSettingsBtn").classList.toggle("active",s==="settings");
     $("profileBtn").setAttribute("aria-pressed",String(s==="profile"));
     $("settingsBtn").setAttribute("aria-pressed",String(s==="settings"));
+    $("mobileSettingsBtn").setAttribute("aria-pressed",String(s==="settings"));
     ["week","requests","friends","templates","stats","profile","settings"].forEach(x=>$(`${x}Section`).classList.toggle("hidden",x!==s));
     if(s==="week")renderWeek();
     if(s==="requests")renderRequests();
