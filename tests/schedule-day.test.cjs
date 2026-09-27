@@ -44,6 +44,7 @@ const lists = {
   schoolScheduleList: makeList(),
   extraScheduleList: makeList(),
   classScheduleEditor: {classList: {remove(){}}},
+  classScheduleDetails: {open:false},
   schoolScheduleEmpty: {classList: {toggle(){}}},
   extraScheduleEmpty: {classList: {toggle(){}}},
 };

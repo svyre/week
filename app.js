@@ -8,7 +8,7 @@
   let state = {
     user:null, profile:null, section:"week", person:"me",
     weekStart: startOfWeek(new Date()), currentDate: new Date(), calendarView:localStorage.getItem("week-calendar-view")==="week"?"week":"day", tasks:[], requests:[], sentRequests:[], templates:[], timeLogs:[], activeTimer:null,
-    friends:[], friendRequests:[], sentFriendRequests:[], schedule:[], personalSchedule:[], classGroup:null, classSchedule:[], classMembers:[], classViewGroup:null, classViewSchedule:[], isWeekAdmin:false, adminGroups:[], adminClassId:null, lastClassCode:null, completionDays:[], movingTaskId:null, draggedTaskId:null,
+    friends:[], friendRequests:[], sentFriendRequests:[], schedule:[], personalSchedule:[], classGroup:null, classSchedule:[], classMembers:[], classViewGroup:null, classViewSchedule:[], classExceptions:[], isWeekAdmin:false, adminGroups:[], adminClassId:null, lastClassCode:null, completionDays:[], movingTaskId:null, draggedTaskId:null,
     demo: !hasSupabase, authMode:"login", onboardingStep:1, sendingFriendIds:new Set()
   };
 
@@ -20,11 +20,11 @@
     tasks:[], requests:[], templates:[
       {id:"t1",title:"Сделать домашку",category:"Школа",duration:60,priority:"mandatory"},
       {id:"t2",title:"Подготовка к репетитору",category:"Репетитор",duration:45,priority:"desirable"}
-    ], timeLogs:[], schedules:[], classGroups:[], classMemberships:[], classSchedules:[], completionDays:[], friendships:[{user_a:"demo-vadim",user_b:"demo-sonya"}], friendRequests:[]
+    ], timeLogs:[], schedules:[], classGroups:[], classMemberships:[], classSchedules:[], classExceptions:[], completionDays:[], friendships:[{user_a:"demo-vadim",user_b:"demo-sonya"}], friendRequests:[]
   };
 
   function uid(){return crypto.randomUUID ? crypto.randomUUID() : Date.now()+"-"+Math.random();}
-  function startOfWeek(d){ const x=new Date(d); const day=(x.getDay()+6)%7; x.setDate(x.getDate()-day); x.setHours(0,0,0,0); return x; }
+  function startOfWeek(d){ const x=new Date(d); const first=localStorage.getItem("week-week-start")==="sunday"?0:1; const day=(x.getDay()-first+7)%7; x.setDate(x.getDate()-day); x.setHours(0,0,0,0); return x; }
   function iso(d){const x=new Date(d);return `${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,"0")}-${String(x.getDate()).padStart(2,"0")}`}
   function esc(s=""){return String(s).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]))}
   function fmtDate(s){return new Intl.DateTimeFormat("ru-RU",{day:"numeric",month:"short"}).format(new Date(s+"T00:00:00"))}
@@ -35,7 +35,7 @@
   function toMin(t){const [h,m]=t.slice(0,5).split(":").map(Number);return h*60+(m||0)}
 
   const APP_CFG=window.APP_CONFIG||{};
-  const GRID_START_HOUR=Number(APP_CFG.dayStartHour??0), GRID_END_HOUR=Number(APP_CFG.dayEndHour??24), PX_PER_HOUR=56;
+  const PX_PER_HOUR=56;
   const LOADING_MIN_MS=5000;
   const splashStartedAt=window.__weekSplashStart||Date.now();
   const loadingMessages=[
@@ -53,7 +53,82 @@
     "План нужен не для давления, а чтобы освободить голову.",
     "Сегодня не обязательно успеть всё. Достаточно сделать главное.",
     "Регулярность почти всегда сильнее редких рывков.",
-    "Не забывай про отдых: энергия — тоже ресурс."];
+    "Не забывай про отдых: энергия — тоже ресурс.",
+    "Чередуй работу и отдых: так легче держать темп.",
+    "Оставь вечером пару минут, чтобы наметить завтрашний день.",
+    "Не каждое свободное окно обязательно чем-то заполнять.",
+    "Одна завершённая задача уже делает день понятнее.",
+    "Если план изменился, просто обнови его.",
+    "Сосредоточься на том, что действительно зависит от тебя.",
+    "Большой проект начинается с понятного первого шага.",
+    "Не сравнивай свой ритм с чужим расписанием.",
+    "Для важного дела полезно заранее выделить время.",
+    "Не забудь поесть и отдохнуть между занятиями.",
+    "Лучше реалистичный план, чем список на весь день.",
+    "Новые идеи удобно записывать сразу, а разбирать позже.",
+    "Сначала уточни задачу, потом выбирай время.",
+    "Оставь запас на дорогу и неожиданные дела.",
+    "Календарь помогает увидеть, когда пора сделать паузу.",
+    "Учёба занимает время, но не должна занимать весь день.",
+    "Если не успел сегодня, спокойно перенеси дело на завтра.",
+    "Привычка появляется постепенно, без необходимости спешить.",
+    "Короткие перерывы помогают сохранять внимание.",
+    "Можно попросить помощи, если задача оказалась сложной.",
+    "Сначала проверь сроки, затем расставляй приоритеты.",
+    "Не бойся упрощать слишком подробный план.",
+    "Отмечай маленькие успехи, даже если впереди много работы.",
+    "Чёткая формулировка задачи экономит время.",
+    "Для отдыха тоже можно оставить место в расписании.",
+    "Не все задачи одинаково срочные.",
+    "Подготовь материалы для следующего урока заранее.",
+    "Выбери спокойный темп, который подходит именно тебе.",
+    "Встречу легче согласовать, когда видна общая занятость.",
+    "Выходные существуют не только для списка дел.",
+    "Один свободный час иногда полезнее ещё одной задачи.",
+    "Если сроки изменились, обнови и план.",
+    "Лучше запланировать меньше и выполнить задуманное.",
+    "Не нужно идеально расписывать каждую минуту.",
+    "Сложный день можно начать с самого понятного дела.",
+    "Перед началом проверь, всё ли нужное под рукой.",
+    "Время в календаре помогает сделать планы конкретными.",
+    "У каждого дня может быть свой ритм.",
+    "Завтра будет проще, если сегодня подготовить главное.",
+    "Проверь, осталось ли время на дорогу.",
+    "Домашние дела тоже заслуживают места в плане.",
+    "Большую задачу можно разделить на несколько коротких.",
+    "Свободный промежуток можно оставить свободным.",
+    "После учёбы полезно переключиться на что-то другое.",
+    "Когда знаешь следующий шаг, начинать легче.",
+    "Планы нужны для удобства, а не для идеальности.",
+    "Распредели сложные занятия, если есть такая возможность.",
+    "Периодически пересматривай задачи, которые уже неактуальны.",
+    "Можно изменить порядок дел и при этом сохранить цель.",
+    "Не забывай закладывать время на обед.",
+    "Срок задачи и время её выполнения не всегда одно и то же.",
+    "В конце недели посмотри, что помогало тебе успевать.",
+    "Хорошее расписание оставляет пространство для неожиданностей.",
+    "Сложный вопрос иногда решается после короткого отдыха.",
+    "Не обязательно делать несколько дел одновременно.",
+    "Выбирай время для работы с учётом собственного самочувствия.",
+    "Сначала закончи маленькую часть, потом берись за следующую.",
+    "Если день насыщенный, особенно важны паузы.",
+    "Список дел может меняться вместе с твоими планами.",
+    "Удобнее заранее увидеть конфликт в расписании.",
+    "Сохраняй важные даты в одном месте.",
+    "Небольшая подготовка помогает меньше спешить утром.",
+    "Уточни детали встречи до того, как внесёшь её в календарь.",
+    "Отдых и занятия могут спокойно соседствовать в одном дне.",
+    "План помогает выбрать, чему уделить внимание сейчас.",
+    "Не расстраивайся из-за перенесённой задачи.",
+    "Если задача неясна, запиши конкретное действие.",
+    "У каждого проекта есть этап, который можно сделать сегодня.",
+    "Подумай, что нужно подготовить к завтрашнему дню.",
+    "Лучше спокойно поправить расписание, чем держать всё в голове.",
+    "После выполнения дела можно немного переключиться.",
+    "Не забывай оставлять время на себя.",
+    "Небольшие привычки поддерживают большие планы.",
+    "Твой календарь должен быть полезен тебе, а не наоборот.",
+    "Сначала разберись со временем, потом добавляй новые планы."];
 
   function resolveTheme(theme){
     return theme==="system"?(window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"):theme;
@@ -153,8 +228,8 @@
           result.push({date:ds,title:t.title,time:String(t.start_time).slice(0,5),kind:"task"});
       }
       // School and additional classes are recurring weekly schedule blocks.
-      for(const item of state.schedule||[]){
-        if(Number(item.day_of_week)!==d.getDay()||!item.start_time||!item.end_time)continue;
+      for(const item of scheduleOnDate(ds)){
+        if(!item.start_time||!item.end_time)continue;
         if(left<toMin(item.end_time)&&right>toMin(item.start_time))
           result.push({date:ds,title:item.title,time:String(item.start_time).slice(0,5),kind:"schedule"});
       }
@@ -367,6 +442,24 @@
     });
   }
 
+  function scheduleOnDate(dateString){
+    const dow=new Date(dateString+"T00:00:00").getDay();
+    const exceptions=new Map((state.classExceptions||[])
+      .filter(e=>e.class_id===state.classGroup?.id&&e.lesson_date===dateString)
+      .map(e=>[e.lesson_id,e]));
+    return (state.schedule||[]).filter(item=>Number(item.day_of_week)===dow).flatMap(item=>{
+      if(!state.classGroup||item.class_id!==state.classGroup.id)return [item];
+      const override=exceptions.get(item.id);
+      if(!override)return [item];
+      if(override.cancelled)return [];
+      return [{...item,title:override.title,start_time:override.start_time,end_time:override.end_time,_oneOff:true}];
+    });
+  }
+  function upcomingWeekday(day){
+    const date=new Date();date.setHours(0,0,0,0);
+    date.setDate(date.getDate()+(Number(day)-date.getDay()+7)%7);
+    return iso(date);
+  }
   function combineSchedules(){
     // Для учеников класса школьные уроки общие. Личные дополнительные занятия остаются.
     return state.classGroup ? [...(state.personalSchedule||[]).filter(s=>s.kind!=="school"),...(state.classSchedule||[])] : [...(state.personalSchedule||[])];
@@ -376,8 +469,9 @@
     state.classViewGroup=groups.find(g=>g.id===state.adminClassId)||state.classGroup||(state.isWeekAdmin?groups[0]:null)||null;
     if(state.isWeekAdmin&&state.classViewGroup)state.adminClassId=state.classViewGroup.id;
     state.classViewSchedule=(demoData.classSchedules||[]).filter(s=>s.class_id===state.classViewGroup?.id);
+    state.classExceptions=(demoData.classExceptions||[]).filter(e=>e.class_id===state.classGroup?.id||e.class_id===state.classViewGroup?.id);
     state.classMembers=(demoData.classMemberships||[]).filter(m=>m.class_id===state.classViewGroup?.id)
-      .map(m=>demoData.profiles.find(p=>p.id===m.user_id)).filter(Boolean);
+      .map(m=>{const p=demoData.profiles.find(p=>p.id===m.user_id);return p?{...p,role:m.role||"student"}:null}).filter(Boolean);
   }
   async function fetchClassContext(personalSchedule){
     const uid=state.user.id;
@@ -414,15 +508,26 @@
     state.personalSchedule=personalSchedule||[];
     state.schedule=combineSchedules();
     state.classViewSchedule=items.filter(s=>s.class_id===state.classViewGroup?.id);
+    state.classExceptions=[];
+    const activeClassIds=[...new Set([state.classGroup?.id,state.classViewGroup?.id].filter(Boolean))];
+    if(activeClassIds.length){
+      const range=calendarQueryRange();
+      const {data:exceptions,error:exErr}=await sb.from("class_schedule_exceptions")
+        .select("id,class_id,lesson_id,lesson_date,cancelled,title,start_time,end_time")
+        .in("class_id",activeClassIds).gte("lesson_date",range.start).lte("lesson_date",range.end);
+      if(exErr){console.warn("Разовые изменения: выполни MIGRATION_2_3_SCHOOL.sql",exErr);return false;}
+      state.classExceptions=exceptions||[];
+    }
     state.classMembers=[];
     if(state.classViewGroup){
-      const {data:memberRows,error}=await sb.from("class_members").select("user_id").eq("class_id",state.classViewGroup.id).order("joined_at");
+      const {data:memberRows,error}=await sb.from("class_members").select("user_id,role").eq("class_id",state.classViewGroup.id).order("joined_at");
       if(error){console.warn("Участники",error);return false;}
       const mids=(memberRows||[]).map(m=>m.user_id);
       if(mids.length){
         const {data:profiles,error:pErr}=await sb.from("public_profiles").select("id,display_name,username").in("id",mids);
         if(pErr){console.warn("Участники",pErr);return false;}
-        state.classMembers=(profiles||[]).sort((a,b)=>a.display_name.localeCompare(b.display_name,"ru"));
+        state.classMembers=(profiles||[]).map(p=>({...p,role:memberRows.find(m=>m.user_id===p.id)?.role||"student"}))
+          .sort((a,b)=>a.display_name.localeCompare(b.display_name,"ru"));
       }
     }
     return true;
@@ -629,14 +734,34 @@
     $("friendSearchForm").onsubmit=searchFriend;
     $("classJoinForm").onsubmit=joinClass;
     $("classCreateForm").onsubmit=createClass;
-    $("adminClassSelect").onchange=async e=>{state.adminClassId=e.target.value||null;$("classCodeBox").classList.add("hidden");await reloadCloud();renderAll()};
-    $("classRotateCode").onclick=rotateClassCode;
+    $("adminClassSelect").onchange=async e=>{
+      state.adminClassId=e.target.value||null;state.__codeGroupId=null;state.lastClassCode=null;
+      $("classScheduleDetails").open=false;
+      $("classCodeBox").classList.add("hidden");$("classLegacyPanel").classList.add("hidden");
+      await reloadCloud();renderAll();
+    };
+    $("classLockOldCode").onclick=()=>lockClassCode(true);
+    $("classGeneratePermanentCode").onclick=()=>lockClassCode(false);
     $("classCopyCode").onclick=async()=>{if(!state.lastClassCode)return;try{await navigator.clipboard.writeText(state.lastClassCode);toast("Код скопирован")}catch{toast("Выдели код и скопируй вручную")}};
     $("classImportMySchedule").onclick=importMySchoolScheduleToClass;
     $("classEditSchedule").onclick=openClassScheduleEditor;
     $("classAddLesson").onclick=()=>addClassLessonRow();
     $("classCancelSchedule").onclick=()=>$("classScheduleEditor").classList.add("hidden");
     $("classSaveSchedule").onclick=saveClassSchedule;
+    $("classResetException").onclick=resetLessonException;
+    $("lessonEditForm").onsubmit=saveLessonChange;
+    $("lessonChangeMode").onchange=()=>{
+      const lesson=state.classViewSchedule.find(x=>x.id===$("lessonEditModal").dataset.lessonId);
+      if(lesson&&$("lessonChangeMode").value==="forever"){
+        $("lessonChangeTitle").value=lesson.title;
+        $("lessonChangeStart").value=String(lesson.start_time).slice(0,5);
+        $("lessonChangeEnd").value=String(lesson.end_time).slice(0,5);
+      }
+      updateLessonEditorMode();
+      if($("lessonChangeMode").value==="once")refreshLessonDateForm();
+    };
+    $("lessonChangeDate").onchange=()=>{refreshLessonDateForm();updateLessonEditorMode();};
+    $("lessonCancelled").onchange=updateLessonEditorMode;
     $("onboardingForm").onsubmit=finishOnboarding;
     $("onboardingNext").onclick=onboardingNext;
     $("onboardingBack").onclick=onboardingBack;
@@ -788,6 +913,7 @@
   function addScheduleEditorRow(type,item={}){
     const list=$(type==="school"?"schoolScheduleList":"extraScheduleList");
     const row=document.createElement("div");row.className="schedule-row";
+    if(item.id)row.dataset.lessonId=item.id;
     // A newly added lesson inherits the last day selected in this editor.
     // Existing lessons keep their saved weekdays when the editor opens.
     const day=String(item.day_of_week ?? list.dataset.lastSelectedDay ??
@@ -911,7 +1037,7 @@
     const tasks=expandOccurrences(base,selectedDate(),1).filter(t=>t.date===ds);
     const timed=tasks.filter(t=>t.start_time);
     const jsDay=selectedDate().getDay();
-    const daySchedule=(state.schedule||[]).filter(x=>Number(x.day_of_week)===jsDay);
+    const daySchedule=scheduleOnDate(ds);
     const total=tasks.reduce((a,t)=>a+minutes(t),0);
     const level=total>480?"high":total>300?"mid":"low";
     const untimed=tasks.filter(t=>!t.start_time);
@@ -927,7 +1053,9 @@
     if(events.length){
       const first=events[0].start;
       const last=Math.max(...events.map(e=>e.end));
-      const dayStart=Math.max(0,first<7*60?first-60:Math.max(7*60,first-60));
+      const preferredHour=Number(localStorage.getItem("week-day-start")||"0");
+      const dayStart=preferredHour>0?Math.min(preferredHour*60,first):
+        Math.max(0,first<7*60?first-60:Math.max(7*60,first-60));
       const dayEnd=Math.min(1440,last>23*60?last+60:Math.min(23*60,last+60));
       // occupiedUntil is the end of the union of all occupied intervals.
       // Overlapping tasks must not create imaginary gaps.
@@ -942,6 +1070,10 @@
       if(occupiedUntil<dayEnd){
         agendaEntries.push({type:"free",start:occupiedUntil,end:dayEnd});
       }
+    }
+    if(!events.length){
+      const preferredHour=Number(localStorage.getItem("week-day-start")||"0");
+      if(preferredHour>0)agendaEntries.push({type:"free",start:preferredHour*60,end:Math.min(1440,(preferredHour+6)*60)});
     }
     const agenda=agendaEntries.map((e,index)=>{
       if(e.type==="free"){
@@ -968,11 +1100,11 @@
       const range=`<div class="agenda-time" aria-label="${esc(timeRange(e.start,e.end))}"><time>${clockTime(e.start)}</time><span class="agenda-time-dash">–</span><time>${clockTime(e.end)}</time>${e.end>=1440?'<span class="agenda-next-day">+1 день</span>':""}</div>`;
       if(e.type==="schedule"){
         const item=e.data;
-        return `<div class="agenda-row agenda-schedule-row">${range}<div class="schedule-track-item ${item.kind==="school"?"schedule-school":"schedule-extra"}"><strong>${esc(item.title)}</strong><span>${esc(item.kind==="school"?"Занятие":"Дополнительное занятие")}</span></div></div>`;
+        return `<div class="agenda-row agenda-schedule-row">${range}<div class="schedule-track-item ${item.kind==="school"?"schedule-school":"schedule-extra"}"><strong>${esc(item.title)}</strong><span>${esc(item._oneOff?"Разовая замена":item.kind==="school"?"Занятие":"Дополнительное занятие")}</span></div></div>`;
       }
       return `<div class="agenda-row agenda-task-row" data-task-id="${e.data.seriesId||e.data.id}" ${e.data.owner_id===currentUserId()&&!e.data.recurrence&&!(window.matchMedia&&window.matchMedia("(pointer: coarse)").matches)?'draggable="true" title="Перетащи задачу в свободный промежуток"':""}>${range}${taskBlockHtml(e.data)}</div>`;
     }).join("");
-    const empty=!tasks.length && !events.length;
+    const empty=!tasks.length && !events.length && !agendaEntries.length;
     $("weekGrid").innerHTML=`<div class="day-col ${isToday(ds)?"today-day":""}">
       <div class="day-head"><div><span class="day-name">${dayTitle(ds)}</span><div class="small muted">${isToday(ds)?"Текущий день":""}</div></div><span class="day-date">${fmtDate(ds)}</span></div>
       <div class="day-summary"><div><strong>${tasks.length}</strong><span> ${tasks.length===1?"задача":"задач"}</span></div><div class="load-line"><span class="${level}" style="width:${Math.min(100,total/600*100)}%"></span></div><span class="small muted">${Math.floor(total/60)} ч ${total%60} мин</span></div>
@@ -993,19 +1125,19 @@
     const occurrences=expandOccurrences(visibleTasks(),state.weekStart,7);
     $("weekGrid").innerHTML=dates.map((date,i)=>{
       const ds=iso(date),tasks=occurrences.filter(t=>t.date===ds);
-      const schedule=(state.schedule||[]).filter(x=>Number(x.day_of_week)===date.getDay()&&x.start_time);
+      const schedule=scheduleOnDate(ds).filter(x=>x.start_time);
       const timed=[...tasks.filter(t=>t.start_time).map(t=>({...t,_type:"task"})),
         ...schedule.map(x=>({...x,_type:"schedule"}))].sort((a,b)=>toMin(a.start_time)-toMin(b.start_time));
       const total=tasks.reduce((a,t)=>a+minutes(t),0);
       const level=total>480?"high":total>300?"mid":"low";
       return `<div class="week-day ${isToday(ds)?"today-day":""}">
         <button class="week-day-head" type="button" onclick="window.selectCalendarDay('${ds}')" aria-label="Открыть ${esc(dayTitle(ds))}">
-          <span>${dayName(i)} <strong>${date.getDate()}</strong></span><span class="small muted">${tasks.length} задач</span>
+          <span>${dayName((date.getDay()+6)%7)} <strong>${date.getDate()}</strong></span><span class="small muted">${tasks.length} задач</span>
         </button>
         <div class="load-line"><span class="${level}" style="width:${Math.min(100,total/600*100)}%"></span></div>
         <div class="week-day-content">
           ${tasks.filter(t=>!t.start_time).map(taskChipHtml).join("")}
-          ${timed.map(t=>t._type==="schedule"?`<div class="week-schedule-item ${t.kind==="school"?"schedule-school":"schedule-extra"}"><span>${timeRange(toMin(t.start_time),toMin(t.end_time||t.start_time))}</span> ${esc(t.title)}</div>`:`<div class="week-task-item">${taskChipHtml(t)}</div>`).join("")}
+          ${timed.map(t=>t._type==="schedule"?`<div class="week-schedule-item ${t.kind==="school"?"schedule-school":"schedule-extra"}"><span>${timeRange(toMin(t.start_time),toMin(t.end_time||t.start_time))}</span> ${esc(t.title)}${t._oneOff?'<span class="oneoff-badge"> · замена</span>':""}</div>`:`<div class="week-task-item">${taskChipHtml(t)}</div>`).join("")}
           ${!tasks.length&&!schedule.length?'<p class="small muted week-empty">Свободно</p>':""}
         </div>
         <button type="button" class="secondary week-add" onclick="window.openTaskForDate('${ds}')">+ Задача</button>
@@ -1068,7 +1200,7 @@
     // The gap is computed from all task and schedule intervals. Recheck before persisting.
     const conflict=visibleTasks().some(t=>t.id!==id&&t.start_time&&occursOn(t,date)&&
       start<toMin(t.start_time)+minutes(t)&&start+minutes(task)>toMin(t.start_time)) ||
-      state.schedule.some(item=>Number(item.day_of_week)===new Date(date+"T00:00:00").getDay()&&
+      scheduleOnDate(date).some(item=>
         item.start_time&&item.end_time&&start<toMin(item.end_time)&&start+minutes(task)>toMin(item.start_time));
     if(conflict){toast("Это время уже занято. Выбери другой промежуток");return}
     if(state.demo){const original=demoData.tasks.find(x=>x.id===id);if(original){original.date=date;original.start_time=time;original.fixed_time=true}saveDemo();loadDemo()}
@@ -1501,6 +1633,7 @@
   // Classes: code issuance and schedule writes are verified by Supabase RPC, not by the UI.
   function classCodeMessage(code){
     state.lastClassCode=code;
+    state.__codeGroupId=state.classViewGroup?.id||state.adminClassId;
     $("classInviteCode").textContent=code;
     $("classCodeBox").classList.remove("hidden");
   }
@@ -1528,7 +1661,7 @@
     if(state.demo){
       const raw=Array.from({length:24},()=>Math.floor(Math.random()*16).toString(16)).join("").toUpperCase();
       const code=raw.match(/.{1,6}/g).join("-");
-      const group={id:uid(),name,invite_code:code};
+      const group={id:uid(),name,invite_code:code,permanent_code:code};
       demoData.classGroups||=[];demoData.classGroups.push(group);
       state.adminClassId=group.id;saveDemo();loadDemo();classCodeMessage(code);renderAll();toast("Класс создан");return;
     }
@@ -1540,18 +1673,46 @@
     await reloadCloud();renderAll();classCodeMessage(result.invite_code);
     $("classCreateName").value="";toast("Класс создан");
   }
-  async function rotateClassCode(){
+  async function showPermanentClassCode(){
     if(!state.isWeekAdmin||!state.classViewGroup)return;
-    if(!confirm("Старый код перестанет работать. Создать новый?"))return;
+    const group=state.classViewGroup, groupId=group.id;
+    if(state.__codeGroupId===groupId)return;
+    state.__codeGroupId=groupId;
+    $("classCodeBox").classList.add("hidden");$("classLegacyPanel").classList.add("hidden");
+    try{
+      const code=state.demo?(demoData.classGroups||[]).find(g=>g.id===groupId)?.permanent_code||null:
+        (await sb.rpc("week_get_class_invite_code",{p_class_id:groupId}));
+      if(!state.isWeekAdmin||state.classViewGroup?.id!==groupId)return;
+      if(state.demo){
+        if(code)classCodeMessage(code);else $("classLegacyPanel").classList.remove("hidden");
+      }else if(code.error){
+        state.__codeGroupId=null;toast("Код класса: выполни миграцию 2.3");
+      }else if(code.data)classCodeMessage(code.data);
+      else $("classLegacyPanel").classList.remove("hidden");
+    }catch(error){state.__codeGroupId=null;console.error(error);}
+  }
+  async function lockClassCode(keepExisting){
+    if(!state.isWeekAdmin||!state.classViewGroup)return;
+    const classId=state.classViewGroup.id;
+    const oldCode=$("classExistingCode").value.trim();
+    if(keepExisting&&!oldCode)return toast("Введи ранее выданный код класса");
+    if(!keepExisting&&!confirm("Будет создан НОВЫЙ постоянный код. Старый код перестанет работать. Продолжить?"))return;
     if(state.demo){
-      const raw=Array.from({length:24},()=>Math.floor(Math.random()*16).toString(16)).join("").toUpperCase();
-      const code=raw.match(/.{1,6}/g).join("-");
-      const group=demoData.classGroups.find(g=>g.id===state.classViewGroup.id);
-      group.invite_code=code;saveDemo();loadDemo();classCodeMessage(code);return;
+      const group=demoData.classGroups.find(g=>g.id===classId);
+      if(keepExisting&&oldCode.replaceAll("-","").toUpperCase()!==group.invite_code.replaceAll("-","").toUpperCase())
+        return toast("Старый код не совпадает");
+      if(!keepExisting){const raw=Array.from(crypto.getRandomValues(new Uint8Array(12)),x=>x.toString(16).padStart(2,"0")).join("").toUpperCase();group.invite_code=raw.match(/.{1,6}/g).join("-");}
+      group.permanent_code=group.invite_code;saveDemo();loadDemo();
+      classCodeMessage(group.permanent_code);
+    }else{
+      const {data,error}=await sb.rpc("week_lock_class_invite_code",{
+        p_class_id:classId,p_existing_code:keepExisting?oldCode:null});
+      if(error)return toast(error.message);
+      if(state.classViewGroup?.id!==classId)return;
+      classCodeMessage(data);
     }
-    const {data,error}=await sb.rpc("week_rotate_class_code",{p_class_id:state.classViewGroup.id});
-    if(error){toast(error.message);return}
-    classCodeMessage(data);toast("Код обновлён");
+    $("classLegacyPanel").classList.add("hidden");
+    toast("За классом закреплён постоянный код");
   }
   function addClassLessonRow(item={}){
     const list=$("classScheduleRows");
@@ -1574,11 +1735,13 @@
     $("classScheduleRows").innerHTML="";
     delete $("classScheduleRows").dataset.lastSelectedDay;
     (state.classViewSchedule||[]).forEach(addClassLessonRow);
+    $("classScheduleDetails").open=true;
     $("classScheduleEditor").classList.remove("hidden");
   }
   async function saveClassSchedule(){
     if(!state.isWeekAdmin||!state.classViewGroup)return;
     const items=[...$("classScheduleRows").querySelectorAll(".schedule-row")].map(row=>({
+      ...(row.dataset.lessonId?{id:row.dataset.lessonId}:{}),
       day_of_week:Number(row.querySelector('[data-field="day"]').value),
       title:row.querySelector('[data-field="title"]').value.trim(),
       start_time:row.querySelector('[data-field="start"]').value,
@@ -1587,8 +1750,14 @@
     if(items.length>70||items.some(x=>!x.title||x.title.length>120||!x.start_time||!x.end_time||x.end_time<=x.start_time))
       return toast("Проверь названия, время уроков и лимит 70 записей");
     if(state.demo){
-      demoData.classSchedules=(demoData.classSchedules||[]).filter(s=>s.class_id!==state.classViewGroup.id);
-      demoData.classSchedules.push(...items.map(x=>({...x,class_id:state.classViewGroup.id,id:uid()})));
+      const classId=state.classViewGroup.id;
+      const oldItems=(demoData.classSchedules||[]).filter(s=>s.class_id===classId);
+      const existing=new Map(oldItems.map(x=>[x.id,x]));
+      const kept=new Set(items.map(x=>x.id).filter(Boolean));
+      const changedDays=new Set(items.filter(x=>x.id&&existing.has(x.id)&&Number(existing.get(x.id).day_of_week)!==x.day_of_week).map(x=>x.id));
+      demoData.classSchedules=(demoData.classSchedules||[]).filter(s=>s.class_id!==classId);
+      demoData.classSchedules.push(...items.map(x=>({...x,class_id:classId,id:x.id||uid()})));
+      demoData.classExceptions=(demoData.classExceptions||[]).filter(x=>x.class_id!==classId||(kept.has(x.lesson_id)&&!changedDays.has(x.lesson_id)));
       saveDemo();loadDemo();$("classScheduleEditor").classList.add("hidden");renderAll();toast("Расписание сохранено");return;
     }
     const {error}=await sb.rpc("week_replace_class_schedule",{p_class_id:state.classViewGroup.id,p_items:items});
@@ -1640,6 +1809,7 @@
         return toast("Выбранный класс изменился. Повтори перенос");
       if(state.demo){
         demoData.classSchedules=(demoData.classSchedules||[]).filter(x=>x.class_id!==classId);
+        demoData.classExceptions=(demoData.classExceptions||[]).filter(x=>x.class_id!==classId);
         demoData.classSchedules.push(...items.map(x=>({...x,class_id:classId,id:uid()})));
         saveDemo();loadDemo();
       }else{
@@ -1665,7 +1835,7 @@
     if(admin){
       const picker=$("adminClassSelect");
       picker.innerHTML=state.adminGroups.length?state.adminGroups.map(g=>`<option value="${g.id}" ${g.id===group?.id?"selected":""}>${esc(g.name)}</option>`).join(""):'<option value="">Классы ещё не созданы</option>';
-      $("classRotateCode").disabled=!group;
+      void showPermanentClassCode();
     }
     $("classContent").classList.toggle("hidden",!group);
     if(!group)return;
@@ -1675,8 +1845,16 @@
       const own=items.filter(i=>Number(i.day_of_week)===day);
       if(!own.length)return "";
       const label=DAY_OPTIONS.find(x=>Number(x[0])===day)?.[1]||"";
-      return `<div class="class-day"><strong>${label}</strong><div>${own.map(i=>`<div class="class-lesson"><span>${esc(String(i.start_time).slice(0,5))}–${esc(String(i.end_time).slice(0,5))}</span><b>${esc(i.title)}</b></div>`).join("")}</div></div>`;
+      return `<div class="class-day"><strong>${label}</strong><div>${own.map(i=>`<div class="class-lesson"><span>${esc(String(i.start_time).slice(0,5))}–${esc(String(i.end_time).slice(0,5))}</span><b>${esc(i.title)}</b>${admin?`<button type="button" class="secondary class-edit-one" onclick="window.openClassLessonEdit('${i.id}')">Изменить</button>`:""}</div>`).join("")}</div></div>`;
     }).join(""):'<p class="small muted">Расписание ещё не заполнено.</p>';
+    const upcoming=(state.classExceptions||[]).filter(x=>x.class_id===group.id&&x.lesson_date>=iso(new Date()))
+      .sort((a,b)=>a.lesson_date.localeCompare(b.lesson_date)).slice(0,12);
+    $("classChangesList").innerHTML=upcoming.length?'<h4>Разовые изменения</h4>'+upcoming.map(x=>{
+      const lesson=items.find(i=>i.id===x.lesson_id);
+      if(!lesson)return "";
+      return `<div class="class-change-line"><strong>${esc(x.lesson_date)}</strong> · ${esc(lesson.title)} → ${x.cancelled?"отменён":
+        `${esc(x.title)} (${esc(String(x.start_time).slice(0,5))}–${esc(String(x.end_time).slice(0,5))})`}</div>`;
+    }).join(""):"";
     $("classImportMySchedule").classList.toggle("hidden",!admin);
     $("classEditSchedule").classList.toggle("hidden",!admin);
     const rows=state.classMembers||[];
@@ -1689,10 +1867,115 @@
         action=incoming?`<button class="primary" onclick="window.acceptFriend('${incoming.id}')">Принять</button>`:
           outgoing?'<span class="small muted">Заявка отправлена</span>':`<button class="secondary" onclick="window.sendFriendRequest('${f.id}')">+ В друзья</button>`;
       }
-      return `<div class="friend-row"><div class="avatar mini">${esc((f.display_name||"П").slice(0,1).toUpperCase())}</div><div class="class-member-name"><strong>${esc(f.display_name)}</strong><div class="small muted">@${esc(f.username||"")}</div></div><div class="actions">${action}</div></div>`;
+      return `<div class="friend-row"><div class="avatar mini">${esc((f.display_name||"П").slice(0,1).toUpperCase())}</div><div class="class-member-name"><strong>${esc(f.display_name)}</strong><div class="small muted">@${esc(f.username||"")}</div><div class="class-role-label">${esc(CLASS_ROLE_LABELS[f.role]||CLASS_ROLE_LABELS.student)}</div></div><div class="actions">${admin?`<select class="class-role-select" aria-label="Звание участника ${esc(f.display_name)}" onchange="window.setClassMemberRole('${f.id}',this.value)">${Object.entries(CLASS_ROLE_LABELS).map(([v,n])=>`<option value="${v}" ${v===(f.role||"student")?"selected":""}>${n}</option>`).join("")}</select>`:""}${action}</div></div>`;
     }).join(""):'<p class="small muted">Пока участников нет.</p>';
   }
 
+  const CLASS_ROLE_LABELS={student:"Ученик",teacher:"Учитель",homeroom_teacher:"Классный руководитель"};
+  window.setClassMemberRole=async(userId,role)=>{
+    if(!state.isWeekAdmin||!state.classViewGroup)return;
+    const classId=state.classViewGroup.id;
+    if(!CLASS_ROLE_LABELS[role])return;
+    if(state.demo){
+      const member=(demoData.classMemberships||[]).find(m=>m.class_id===classId&&m.user_id===userId);
+      if(!member)return;member.role=role;saveDemo();loadDemo();renderClasses();toast("Звание изменено");return;
+    }
+    const {error}=await sb.rpc("week_set_class_member_role",{p_class_id:classId,p_user_id:userId,p_role:role});
+    if(error){toast(error.message);renderClasses();return;}
+    await reloadCloud();renderAll();toast("Звание изменено");
+  };
+  function updateLessonEditorMode(){
+    const once=$("lessonChangeMode").value==="once";
+    $("lessonChangeDateField").classList.toggle("hidden",!once);
+    $("lessonChangeDayField").classList.toggle("hidden",once);
+    $("lessonCancelOnceField").classList.toggle("hidden",!once);
+    $("lessonChangeDate").required=once;
+    $("lessonChangeTitle").required=!(once&&$("lessonCancelled").checked);
+    $("lessonChangeStart").required=!(once&&$("lessonCancelled").checked);
+    $("lessonChangeEnd").required=!(once&&$("lessonCancelled").checked);
+    if(!once){$("lessonChangeDate").setCustomValidity("");$("classResetException").classList.add("hidden");}
+  }
+  function refreshLessonDateForm(){
+    const lesson=state.classViewSchedule.find(x=>x.id===$("lessonEditModal").dataset.lessonId);
+    if(!lesson||$("lessonChangeMode").value!=="once")return;
+    const date=$("lessonChangeDate").value;
+    const valid=date&&new Date(date+"T00:00:00").getDay()===Number(lesson.day_of_week);
+    $("lessonChangeDate").setCustomValidity(valid?"":"Выбери дату с тем же днём недели, что и урок");
+    const ex=(state.classExceptions||[]).find(e=>e.lesson_id===lesson.id&&e.lesson_date===date);
+    $("classResetException").classList.toggle("hidden",!ex);
+    $("lessonChangeTitle").value=ex&&!ex.cancelled?ex.title:lesson.title;
+    $("lessonChangeStart").value=String(ex&&!ex.cancelled?ex.start_time:lesson.start_time).slice(0,5);
+    $("lessonChangeEnd").value=String(ex&&!ex.cancelled?ex.end_time:lesson.end_time).slice(0,5);
+    $("lessonCancelled").checked=!!ex?.cancelled;
+  }
+  window.openClassLessonEdit=id=>{
+    if(!state.isWeekAdmin)return;
+    const lesson=state.classViewSchedule.find(x=>x.id===id);
+    if(!lesson)return;
+    const modal=$("lessonEditModal");
+    modal.dataset.lessonId=id;modal.dataset.classId=state.classViewGroup.id;
+    $("lessonChangeMode").value="once";
+    $("lessonChangeDay").value=String(lesson.day_of_week);
+    $("lessonChangeDate").value=upcomingWeekday(lesson.day_of_week);
+    $("lessonChangeTitle").value=lesson.title;
+    $("lessonChangeStart").value=String(lesson.start_time).slice(0,5);
+    $("lessonChangeEnd").value=String(lesson.end_time).slice(0,5);
+    $("lessonCancelled").checked=false;
+    updateLessonEditorMode();refreshLessonDateForm();modal.classList.remove("hidden");
+  };
+  async function resetLessonException(){
+    if(!state.isWeekAdmin)return;
+    const modal=$("lessonEditModal"),lessonId=modal.dataset.lessonId,classId=modal.dataset.classId,
+      date=$("lessonChangeDate").value;
+    if(state.classViewGroup?.id!==classId||!date)return;
+    if(!confirm("Вернуть обычный урок на эту дату?"))return;
+    if(state.demo){
+      demoData.classExceptions=(demoData.classExceptions||[]).filter(x=>x.lesson_id!==lessonId||x.lesson_date!==date);
+      saveDemo();loadDemo();
+    }else{
+      const {error}=await sb.rpc("week_remove_class_lesson_exception",{p_lesson_id:lessonId,p_date:date});
+      if(error)return toast(error.message);
+      await reloadCloud();
+    }
+    modal.classList.add("hidden");renderAll();toast("Обычное расписание восстановлено");
+  }
+  async function saveLessonChange(e){
+    e.preventDefault();
+    if(!state.isWeekAdmin)return;
+    const modal=$("lessonEditModal"),classId=modal.dataset.classId,lessonId=modal.dataset.lessonId;
+    if(state.classViewGroup?.id!==classId)return toast("Класс был изменён, открой урок заново");
+    const mode=$("lessonChangeMode").value,date=$("lessonChangeDate").value;
+    const day=Number($("lessonChangeDay").value),cancelled=mode==="once"&&$("lessonCancelled").checked;
+    const title=$("lessonChangeTitle").value.trim(),start=$("lessonChangeStart").value,end=$("lessonChangeEnd").value;
+    if(mode==="once"){
+      const lesson=state.classViewSchedule.find(x=>x.id===lessonId);
+      if(!lesson||!date||new Date(date+"T00:00:00").getDay()!==Number(lesson.day_of_week))
+        return toast("Выбери правильную дату для этого урока");
+    }
+    if(!cancelled&&(!title||title.length>120||!start||!end||end<=start))
+      return toast("Проверь название и время урока");
+    if(state.demo){
+      const lesson=demoData.classSchedules.find(x=>x.id===lessonId&&x.class_id===classId);
+      if(!lesson)return;
+      if(mode==="once"){
+        demoData.classExceptions||=[];
+        demoData.classExceptions=demoData.classExceptions.filter(x=>x.lesson_id!==lessonId||x.lesson_date!==date);
+        demoData.classExceptions.push({id:uid(),class_id:classId,lesson_id:lessonId,lesson_date:date,cancelled,
+          title:cancelled?null:title,start_time:cancelled?null:start,end_time:cancelled?null:end});
+      }else{
+        if(Number(lesson.day_of_week)!==day)demoData.classExceptions=(demoData.classExceptions||[]).filter(x=>x.lesson_id!==lessonId);
+        Object.assign(lesson,{day_of_week:day,title,start_time:start,end_time:end});
+      }
+      saveDemo();loadDemo();
+    }else{
+      const {error}=await sb.rpc("week_change_class_lesson",{p_lesson_id:lessonId,p_mode:mode,
+        p_date:mode==="once"?date:null,p_day_of_week:mode==="forever"?day:null,
+        p_title:cancelled?null:title,p_start_time:cancelled?null:start,p_end_time:cancelled?null:end,p_cancelled:cancelled});
+      if(error)return toast(error.message);
+      await reloadCloud();
+    }
+    modal.classList.add("hidden");renderAll();toast(mode==="once"?"Изменён только выбранный день":"Расписание изменено на все недели");
+  }
   function renderFriends(){
     const list=$("friendsList"), req=$("friendRequestsList"), sent=$("sentFriendRequestsList");
     list.innerHTML=state.friends.length?state.friends.map(f=>`<div class="friend-row"><div class="avatar mini">${esc((f.display_name||"П").slice(0,1).toUpperCase())}</div><div><strong>${esc(f.display_name)}</strong><div class="small muted">@${esc(f.username||"")}</div></div><div class="actions"><button class="secondary" onclick="window.unfriend('${f.id}')">Удалить</button></div></div>`).join(""):'<p class="muted small">Пока нет друзей.</p>';
@@ -1749,7 +2032,7 @@
     const days=Array.from({length:7},(_,i)=>{
       const date=statsDate(i),day=iso(date);
       const tasks=ts.filter(t=>t.date===day);
-      const schedule=(state.schedule||[]).filter(x=>Number(x.day_of_week)===date.getDay()&&x.start_time&&x.end_time);
+      const schedule=scheduleOnDate(day).filter(x=>x.start_time&&x.end_time);
       const taskMin=tasks.reduce((a,t)=>a+minutes(t),0);
       const schoolMin=schedule.filter(x=>x.kind==="school").reduce((a,x)=>a+Math.max(0,toMin(x.end_time)-toMin(x.start_time)),0);
       const extraMin=schedule.filter(x=>x.kind!=="school").reduce((a,x)=>a+Math.max(0,toMin(x.end_time)-toMin(x.start_time)),0);
@@ -1786,7 +2069,8 @@
     $("statsBars").innerHTML=days.map((d,i)=>{
       const segments=[["tasks",d.taskMin],["school",d.schoolMin],["extra",d.extraMin]];
       const bar=segments.filter(([,v])=>v>0).map(([type,v])=>`<span class="stat-bar-${type}" style="height:${Math.max(2,v/maxVal*178)}px" title="${type==="tasks"?"Задачи":type==="school"?"Школа":"Доп. занятия"}: ${formatMinutes(v)}"></span>`).join("");
-      return `<div class="bar-wrap" title="${dayName(i)}: ${formatMinutes(d.total)}"><div class="small stats-bar-total">${(d.total/60).toFixed(1)} ч</div><div class="stats-bar-stack" aria-label="${dayName(i)}: ${formatMinutes(d.total)}">${bar}</div><div class="bar-label">${dayName(i)}</div></div>`;
+      const label=dayName((d.date.getDay()+6)%7);
+      return `<div class="bar-wrap" title="${label}: ${formatMinutes(d.total)}"><div class="small stats-bar-total">${(d.total/60).toFixed(1)} ч</div><div class="stats-bar-stack" aria-label="${label}: ${formatMinutes(d.total)}">${bar}</div><div class="bar-label">${label}</div></div>`;
     }).join("");
     const cats={};
     ts.forEach(t=>cats[t.category||"Другое"]=(cats[t.category||"Другое"]||0)+minutes(t));
@@ -1806,6 +2090,8 @@
   function renderSettings(){
     $("defaultDuration").value=localStorage.getItem("week-default-duration")||60;
     if($("themeSelect"))$("themeSelect").value=localStorage.getItem("week-theme")||APP_CFG.theme||"system";
+    $("weekFirstDay").value=localStorage.getItem("week-week-start")==="sunday"?"sunday":"monday";
+    $("dayStartHour").value=localStorage.getItem("week-day-start")||"0";
     const ns=notificationSettings();
     if($("notificationsEnabled")){ $("notificationsEnabled").checked=ns.enabled; $("notificationLead").value=String(ns.lead); }
   }
@@ -1829,6 +2115,9 @@
     const duration=Number($("defaultDuration").value);
     if(!Number.isFinite(duration)||duration<5||duration>1440){toast("Укажи длительность от 5 до 1440 минут");return}
     localStorage.setItem("week-default-duration",String(duration));
+    localStorage.setItem("week-week-start",$("weekFirstDay").value);
+    localStorage.setItem("week-day-start",$("dayStartHour").value);
+    syncWeekStart();renderWeek();renderStats();
     saveNotificationSettings();
     await syncPushSubscription();
     toast("Настройки сохранены");

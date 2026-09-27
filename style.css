@@ -572,3 +572,21 @@ html[data-theme="dark"] .gap-add-button{background:#292e36;color:#d6cee5;border-
   #classMembersList .friend-row{gap:7px}
   #classMembersList .friend-row .actions button{padding:7px 9px;font-size:12px}
 }
+
+/* week. 2.3: compact classes, one-off lessons, participant titles */
+.class-schedule-details{border:1px solid var(--line);border-radius:16px;margin:18px 0;padding:2px 14px 14px;background:var(--surface)}
+.class-schedule-details>summary{cursor:pointer;list-style:none;font-size:17px;font-weight:750;padding:15px 0;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.class-schedule-details>summary::-webkit-details-marker{display:none}
+.class-schedule-details>summary::before{content:'▸';color:#a58adb;font-size:20px;transition:transform .15s}
+.class-schedule-details[open]>summary::before{transform:rotate(90deg)}
+.class-schedule-details:not([open]){padding-bottom:2px}
+.class-open-actions{justify-content:flex-start;margin:4px 0 15px}
+.class-edit-one{margin-left:auto;font-size:12px;padding:7px 11px}
+.class-role-label{color:var(--muted);font-size:12px;padding-top:3px}
+.class-role-select{width:auto;max-width:190px;font-size:12px}
+.class-change-line{padding:9px 12px;border:1px solid var(--line);border-radius:10px;margin:7px 0;background:var(--surface2);font-size:13px}
+#classChangesList{margin:14px 0}
+#classLegacyPanel>div{width:100%}#classLegacyPanel input{width:100%;margin-top:9px}
+@media(max-width:700px){.class-schedule-details{padding:2px 10px 10px}.class-lesson .class-edit-one{margin-left:0}.class-role-select{max-width:100%;width:100%}#classMembersList .friend-row .actions{max-width:48%;flex-wrap:wrap}.class-schedule-details>summary .small{font-size:11px}}
+
+.oneoff-badge{font-size:11px;color:#8960b5;font-weight:650}#classResetException{margin-right:auto}

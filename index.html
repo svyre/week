@@ -172,26 +172,46 @@
             </form>
             <label>Выбрать класс<select id="adminClassSelect"><option value="">Классы не созданы</option></select></label>
             <div id="classCodeBox" class="class-code-box hidden">
-              <div><strong>Новый код приглашения</strong><p class="small muted">Скопируй и передай ученикам. После закрытия код можно только заменить новым.</p><code id="classInviteCode"></code></div>
+              <div><strong>Постоянный код выбранного класса</strong><p class="small muted">Один код на класс, подходит для регистрации всех его участников.</p><code id="classInviteCode"></code></div>
               <button id="classCopyCode" type="button" class="secondary">Копировать</button>
             </div>
-            <button id="classRotateCode" type="button" class="secondary">Сгенерировать новый код для выбранного класса</button>
+            <div id="classLegacyPanel" class="class-code-box hidden">
+              <div><strong>Код старого класса</strong><p class="small muted">Старый код сохранён в базе только как хеш и по нему нельзя восстановить текст. Если код у тебя есть, введи его, чтобы закрепить навсегда. Иначе можно создать один новый постоянный код. Тогда старый перестанет работать.</p>
+                <input id="classExistingCode" maxlength="32" placeholder="Ранее выданный код">
+                <div class="class-editor-actions"><button id="classLockOldCode" type="button" class="secondary">Закрепить старый код</button><button id="classGeneratePermanentCode" type="button" class="secondary">Новый постоянный код</button></div>
+              </div>
+            </div>
           </div>
           <div id="classContent" class="hidden">
-            <div class="friends-subsection"><div class="class-heading"><h3>Расписание уроков</h3><div class="class-heading-actions"><button id="classImportMySchedule" type="button" class="secondary hidden">Перенести моё расписание</button><button id="classEditSchedule" type="button" class="secondary hidden">Редактировать</button></div></div>
+            <details id="classScheduleDetails" class="class-schedule-details">
+              <summary>Расписание уроков <span class="small muted">Нажми, чтобы развернуть или свернуть</span></summary>
+              <div class="class-heading-actions class-open-actions"><button id="classImportMySchedule" type="button" class="secondary hidden">Перенести моё расписание</button><button id="classEditSchedule" type="button" class="secondary hidden">Редактировать всё расписание</button></div>
               <div id="classScheduleList"></div>
-            </div>
-            <div id="classScheduleEditor" class="hidden">
-              <h3>Редактор расписания</h3>
-              <p class="small muted">Изменения сразу применятся ко всем участникам этого класса.</p>
-              <div id="classScheduleRows" class="schedule-editor"></div>
-              <div class="class-editor-actions"><button id="classAddLesson" class="secondary" type="button">+ Урок</button><button id="classCancelSchedule" class="secondary" type="button">Отмена</button><button id="classSaveSchedule" class="primary" type="button">Сохранить расписание</button></div>
-            </div>
+              <div id="classChangesList"></div>
+              <div id="classScheduleEditor" class="hidden">
+                <h3>Редактор расписания</h3>
+                <p class="small muted">Постоянные изменения применяются ко всем неделям. Уроки с неизменённым днём сохраняют свои разовые замены.</p>
+                <div id="classScheduleRows" class="schedule-editor"></div>
+                <div class="class-editor-actions"><button id="classAddLesson" class="secondary" type="button">+ Урок</button><button id="classCancelSchedule" class="secondary" type="button">Отмена</button><button id="classSaveSchedule" class="primary" type="button">Сохранить расписание</button></div>
+              </div>
+            </details>
             <div class="friends-subsection"><h3>Участники класса</h3><div id="classMembersList"></div></div>
           </div>
         </div>
       </section>
 
+      <div id="lessonEditModal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Изменение урока">
+        <form id="lessonEditForm" class="modal-card small-card">
+          <div class="modal-head"><h2>Изменить урок</h2><button type="button" class="close" data-close="lessonEditModal" aria-label="Закрыть">×</button></div>
+          <label>Как изменить<select id="lessonChangeMode"><option value="once">Изменить единожды</option><option value="forever">Изменить навсегда</option></select></label>
+          <label id="lessonChangeDateField">Дата занятия<input id="lessonChangeDate" type="date" required><span class="small muted">Только выбранная дата. Остальные недели не изменятся.</span></label>
+          <label id="lessonChangeDayField" class="hidden">День недели<select id="lessonChangeDay"><option value="1">Понедельник</option><option value="2">Вторник</option><option value="3">Среда</option><option value="4">Четверг</option><option value="5">Пятница</option><option value="6">Суббота</option><option value="0">Воскресенье</option></select></label>
+          <label id="lessonCancelOnceField" class="check-row"><input id="lessonCancelled" type="checkbox"> Отменить этот урок только на выбранную дату</label>
+          <label>Предмет<input id="lessonChangeTitle" maxlength="120" required></label>
+          <div class="form-grid"><label>Начало<input id="lessonChangeStart" type="time" required></label><label>Конец<input id="lessonChangeEnd" type="time" required></label></div>
+          <div class="modal-actions"><button type="button" id="classResetException" class="secondary hidden">Вернуть обычный урок</button><button type="button" class="secondary" data-close="lessonEditModal">Отмена</button><button type="submit" class="primary">Сохранить изменение</button></div>
+        </form>
+      </div>
       <section id="templatesSection" class="section hidden">
         <div class="panel">
           <div class="panel-head">
@@ -241,6 +261,12 @@
             <label class="switch"><input id="notificationsEnabled" type="checkbox"><span></span> Включить</label>
             <label>Напоминать за<select id="notificationLead"><option value="5">5 минут</option><option value="10">10 минут</option><option value="15" selected>15 минут</option><option value="30">30 минут</option></select></label>
             <button id="enableNotifications" class="secondary">Разрешить уведомления</button>
+          </div>
+          <div class="settings-card">
+            <strong>Календарь</strong>
+            <p class="small muted">Эти настройки действуют только на твоём устройстве.</p>
+            <label>Первый день недели<select id="weekFirstDay"><option value="monday">Понедельник</option><option value="sunday">Воскресенье</option></select></label>
+            <label>Начало дневной шкалы<select id="dayStartHour"><option value="0">Автоматически</option><option value="6">06:00</option><option value="7">07:00</option><option value="8">08:00</option><option value="9">09:00</option><option value="10">10:00</option><option value="12">12:00</option></select></label>
           </div>
           <label>Стандартная длительность задачи (мин)<input id="defaultDuration" type="number" min="5" max="1440" step="5" value="60"></label>
           <button id="saveSettings" class="primary">Сохранить настройки</button>
