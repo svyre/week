@@ -509,3 +509,22 @@ html[data-theme="dark"] .gap-add-button{background:#292e36;color:#d6cee5;border-
 .stats-category-track{height:6px;margin:9px 0 0}
 @media(max-width:850px){.stats-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.stats-feature-grid{grid-template-columns:1fr}}
 @media(max-width:370px){.stat-enhanced{padding:13px}.stat-enhanced strong{font-size:19px}.streak-grid{gap:3px}.streak-day{border-radius:3px}.stats-legend{gap:8px 12px}}
+
+
+/* week. 2.0.1: respect iPhone Dynamic Island / notch in standalone PWA and Safari.
+   The extra 22px keeps controls comfortable on regular mobile screens too.
+   Safari provides a device-specific inset with viewport-fit=cover. */
+:root{--week-safe-top:env(safe-area-inset-top,0px)}
+@media(max-width:700px){
+  .main{
+    padding-top:calc(22px + var(--week-safe-top));
+    padding-left:max(12px,env(safe-area-inset-left,0px));
+    padding-right:max(12px,env(safe-area-inset-right,0px));
+  }
+  .auth-screen{padding-top:calc(20px + var(--week-safe-top))}
+  /* Sticky controls must not drift under the camera cutout when scrolling. */
+  .person-tabs{top:calc(8px + var(--week-safe-top))}
+  .timeline-move-hint{top:calc(8px + var(--week-safe-top))}
+  /* Sheets may expand, but their close buttons must stay below the top safe area. */
+  .modal-card{max-height:calc(100dvh - var(--week-safe-top) - 14px)}
+}
