@@ -554,3 +554,8 @@ end;
 $$;
 drop trigger if exists shared_task_member_added_notification on public.task_members;
 create trigger shared_task_member_added_notification after insert on public.task_members for each row execute function public.notify_task_member_added();
+
+
+-- week. 1.1: compact checklists, shared tasks and proposals (safe to run again).
+alter table public.tasks add column if not exists checklist jsonb not null default '[]'::jsonb;
+alter table public.task_requests add column if not exists checklist jsonb not null default '[]'::jsonb;

@@ -76,6 +76,11 @@
           <button id="prevWeek" class="icon-btn" aria-label="Предыдущий день">←</button>
           <button id="todayBtn" class="secondary today-chip">Сегодня</button>
           <button id="nextWeek" class="icon-btn" aria-label="Следующий день">→</button>
+          <div class="calendar-view-switch" role="group" aria-label="Вид календаря">
+            <button type="button" data-calendar-view="day" class="active" aria-pressed="true">День</button>
+            <button type="button" data-calendar-view="week" aria-pressed="false">Неделя</button>
+          </div>
+          <button type="button" id="overdueBtn" class="secondary overdue-btn hidden">↪ Перенести</button>
           <div class="load-legend">
             <span><i class="dot low"></i> свободно</span>
             <span><i class="dot mid"></i> средне</span>
@@ -200,6 +205,11 @@
         <input type="hidden" id="taskId">
         <label>Название<input id="taskTitle" required placeholder="Например: сделать домашку"></label>
         <label>Описание<textarea id="taskDescription" rows="3"></textarea></label>
+        <div class="task-checklist-editor">
+          <div class="checklist-head"><strong>Чек-лист</strong><button type="button" class="secondary" id="taskChecklistAdd">+ Пункт</button></div>
+          <div id="taskChecklistRows" class="checklist-edit-rows"></div>
+          <p class="small muted">До 50 пунктов в одной задаче. Отмечай их по отдельности.</p>
+        </div>
         <div class="form-grid">
           <label>Дата<input id="taskDate" type="date" required></label>
           <label>Время<input id="taskTime" type="time"></label>
@@ -229,8 +239,33 @@
           </div>
           <p id="proposalHint" class="small muted hidden">После создания задача попадёт выбранному другу на рассмотрение.</p>
         </div>
+        <div id="taskConflictWarning" class="conflict-warning hidden" role="alert">
+          <strong>⚠ Есть пересечения по времени</strong>
+          <ul id="taskConflictList"></ul>
+          <p id="taskConflictExtra" class="small muted"></p>
+          <label><input type="checkbox" id="taskConflictOverride"> Всё равно сохранить задачу</label>
+        </div>
         <div class="modal-actions"><button type="button" class="secondary" data-close="taskModal">Отмена</button><button class="primary" type="submit">Сохранить</button></div>
       </form>
+    </div>
+  </div>
+
+  <div id="overdueModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="overdueModalTitle">
+    <div class="modal-card small-card">
+      <div class="modal-head"><h2 id="overdueModalTitle">Перенести незавершённые дела</h2><button type="button" class="close" data-close="overdueModal" aria-label="Закрыть">×</button></div>
+      <p class="small muted">Отметь задачи для переноса на сегодня. Их прежнее время будет очищено, чтобы не создавать случайных пересечений. Повторяющиеся задачи не переносятся.</p>
+      <label class="overdue-select-all"><input type="checkbox" id="overdueSelectAll" checked> Выбрать все</label>
+      <div id="overdueList" class="overdue-list"></div>
+      <div class="modal-actions"><button type="button" class="secondary" data-close="overdueModal">Отмена</button><button type="button" class="primary" id="overdueApply">Перенести на сегодня</button></div>
+    </div>
+  </div>
+
+  <div id="checklistModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="checklistModalTitle">
+    <div class="modal-card small-card">
+      <div class="modal-head"><h2 id="checklistModalTitle">Чек-лист</h2><button type="button" class="close" data-close="checklistModal" aria-label="Закрыть">×</button></div>
+      <p id="checklistProgress" class="small muted"></p>
+      <div id="checklistItems"></div>
+      <div class="modal-actions"><button type="button" class="secondary" data-close="checklistModal">Закрыть</button><button type="button" class="primary" id="checklistEditBtn">Редактировать</button></div>
     </div>
   </div>
 

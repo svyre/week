@@ -7,7 +7,7 @@
 
   let state = {
     user:null, profile:null, section:"week", person:"me",
-    weekStart: startOfWeek(new Date()), currentDate: new Date(), tasks:[], requests:[], sentRequests:[], templates:[], timeLogs:[], activeTimer:null,
+    weekStart: startOfWeek(new Date()), currentDate: new Date(), calendarView:localStorage.getItem("week-calendar-view")==="week"?"week":"day", tasks:[], requests:[], sentRequests:[], templates:[], timeLogs:[], activeTimer:null,
     friends:[], friendRequests:[], sentFriendRequests:[], schedule:[],
     demo: !hasSupabase, authMode:"login", onboardingStep:1, sendingFriendIds:new Set()
   };
@@ -73,6 +73,65 @@
       }
     }
     return out;
+  }
+
+  // Keep checklists as compact JSON arrays on their tasks (no extra tables or uploads).
+  function checklistFor(t){return Array.isArray(t?.checklist)?t.checklist.filter(x=>x&&typeof x.text==="string"):[]}
+  function checklistSummary(t){
+    const items=checklistFor(t);
+    return items.length?`<button class="checklist-link" type="button" onclick="window.openChecklist('${t.seriesId||t.id}')" title="Открыть чек-лист">☑ ${items.filter(x=>x.done).length}/${items.length}</button>`:"";
+  }
+  function ownOverdueTasks(){
+    const today=iso(new Date());
+    return state.tasks.filter(t=>t.owner_id===currentUserId()&&t.status==="open"&&!t.recurrence&&t.date<today).sort((a,b)=>a.date.localeCompare(b.date));
+  }
+  function currentFormTask(){
+    return {date:$("taskDate").value,start_time:$("taskTime").value||null,
+      duration:Math.max(5,Number($("taskDuration").value)||60),
+      recurrence:$("taskRecurring").checked?$("taskRecurrence").value:null};
+  }
+  function occursOn(t,ds){
+    if(ds<t.date)return false;
+    if(!t.recurrence)return ds===t.date;
+    const d=new Date(ds+"T00:00:00"),base=new Date(t.date+"T00:00:00");
+    return t.recurrence==="daily" || (t.recurrence==="weekly"&&d.getDay()===base.getDay()) ||
+      (t.recurrence==="weekdays"&&d.getDay()!==0&&d.getDay()!==6);
+  }
+  function taskConflicts(candidate,editingId=""){
+    if(!candidate.date||!candidate.start_time)return [];
+    if(qs('input[name="destination"]:checked')?.value==="proposal")return [];
+    const start=new Date(candidate.date+"T00:00:00");
+    if(Number.isNaN(start.getTime()))return [];
+    const first=candidate.recurrence&&start<new Date(iso(new Date())+"T00:00:00")?new Date(iso(new Date())+"T00:00:00"):start;
+    const count=candidate.recurrence?35:1, result=[];
+    for(let i=0;i<count;i++){
+      const d=new Date(first);d.setDate(first.getDate()+i);const ds=iso(d);
+      if(!occursOn(candidate,ds))continue;
+      const left=toMin(candidate.start_time),right=left+candidate.duration;
+      for(const t of visibleTasks()){
+        if(t.id===editingId||!t.start_time||!occursOn(t,ds))continue;
+        if(left<toMin(t.start_time)+minutes(t)&&right>toMin(t.start_time))
+          result.push({date:ds,title:t.title,time:String(t.start_time).slice(0,5),kind:"task"});
+      }
+      // School and additional classes are recurring weekly schedule blocks.
+      for(const item of state.schedule||[]){
+        if(Number(item.day_of_week)!==d.getDay()||!item.start_time||!item.end_time)continue;
+        if(left<toMin(item.end_time)&&right>toMin(item.start_time))
+          result.push({date:ds,title:item.title,time:String(item.start_time).slice(0,5),kind:"schedule"});
+      }
+      if(result.length>=5)break;
+    }
+    return result;
+  }
+  function updateConflictWarning(){
+    const box=$("taskConflictWarning"), override=$("taskConflictOverride");
+    if(!box||$("taskModal").classList.contains("hidden"))return;
+    const found=taskConflicts(currentFormTask(),$("taskId").value);
+    box.classList.toggle("hidden",!found.length);
+    if(!found.length){override.checked=false;return}
+    $("taskConflictList").innerHTML=found.slice(0,4).map(c=>
+      `<li><strong>${fmtDate(c.date)}</strong>, ${esc(c.time)} — ${esc(c.title)}${c.kind==="schedule"?" (занятие)":""}</li>`).join("");
+    $("taskConflictExtra").textContent=found.length>4?"Показаны первые четыре совпадения.":"";
   }
 
   function trackedMinutesFor(taskId){
@@ -359,17 +418,41 @@
     $("addSchoolItem").onclick=()=>addScheduleEditorRow("school");
     $("addExtraItem").onclick=()=>addScheduleEditorRow("extra");
     $("editScheduleBtn").onclick=()=>openOnboarding();
-    $("prevWeek").onclick=()=>moveDay(-1);
-    $("nextWeek").onclick=()=>moveDay(1);
+    $("prevWeek").onclick=()=>moveDay(state.calendarView==="week"?-7:-1);
+    $("nextWeek").onclick=()=>moveDay(state.calendarView==="week"?7:1);
+    qsa("[data-calendar-view]").forEach(b=>b.onclick=()=>{
+      state.calendarView=b.dataset.calendarView;
+      localStorage.setItem("week-calendar-view",state.calendarView);
+      renderWeek();
+    });
+    $("overdueBtn").onclick=openOverdue;
+    $("overdueApply").onclick=applyOverdue;
+    $("overdueSelectAll").onchange=e=>qsa('#overdueList input[type="checkbox"]').forEach(input=>input.checked=e.target.checked);
+    $("taskChecklistAdd").onclick=()=>addChecklistEditorRow({},true);
+    $("taskChecklistRows").addEventListener("click",e=>{
+      if(e.target.closest("[data-checklist-remove]"))e.target.closest(".checklist-edit-row").remove();
+    });
+    $("checklistItems").addEventListener("change",e=>{
+      if(e.target.matches('[data-checklist-toggle]'))window.toggleChecklistItem(e.target.dataset.checklistToggle,e.target.checked);
+    });
+    $("checklistEditBtn").onclick=()=>{
+      const t=state.tasks.find(x=>x.id===$("checklistModal").dataset.taskId);
+      $("checklistModal").classList.add("hidden");if(t)openTask(t);
+    };
+    ["taskDate","taskTime","taskDuration","taskRecurrence","taskRecurring"].forEach(id=>{
+      const changed=()=>{$("taskConflictOverride").checked=false;updateConflictWarning()};
+      $(id).addEventListener("input",changed);
+      $(id).addEventListener("change",changed);
+    });
     $("todayBtn").onclick=()=>goToday();
-    document.addEventListener("keydown",e=>{if(state.section!=="week"||$("taskModal")?.classList.contains("hidden")===false)return;if(e.key==="ArrowLeft")moveDay(-1);if(e.key==="ArrowRight")moveDay(1)});
+    document.addEventListener("keydown",e=>{if(state.section!=="week"||$("taskModal")?.classList.contains("hidden")===false)return;if(["INPUT","TEXTAREA","SELECT"].includes(document.activeElement?.tagName))return;if(e.key==="ArrowLeft")moveDay(state.calendarView==="week"?-7:-1);if(e.key==="ArrowRight")moveDay(state.calendarView==="week"?7:1)});
     let touchX=null;
     $("weekGrid").addEventListener("touchstart",e=>{touchX=e.changedTouches[0].clientX},{passive:true});
-    $("weekGrid").addEventListener("touchend",e=>{if(touchX===null)return;const dx=e.changedTouches[0].clientX-touchX;touchX=null;if(Math.abs(dx)>45)moveDay(dx<0?1:-1)},{passive:true});
+    $("weekGrid").addEventListener("touchend",e=>{if(touchX===null)return;if(state.calendarView==="week"){touchX=null;return}const dx=e.changedTouches[0].clientX-touchX;touchX=null;if(Math.abs(dx)>45)moveDay(dx<0?(state.calendarView==="week"?7:1):(state.calendarView==="week"?-7:-1))},{passive:true});
     $("addTaskBtn").onclick=()=>openTask();
     $("addTemplateBtn").onclick=()=>$("templateModal").classList.remove("hidden");
     $("taskRecurring").onchange=e=>$("recurrenceBox").classList.toggle("hidden",!e.target.checked);
-    qsa('input[name="destination"]').forEach(r=>r.onchange=()=>updateDestinationUI());
+    qsa('input[name="destination"]').forEach(r=>r.onchange=()=>{updateDestinationUI();updateConflictWarning()});
     qsa("[data-close]").forEach(b=>b.onclick=()=>$(b.dataset.close).classList.add("hidden"));
     $("taskForm").onsubmit=saveTask;
     $("templateForm").onsubmit=saveTemplate;
@@ -530,6 +613,17 @@
   }
 
   function renderWeek(){
+    const overdue=ownOverdueTasks();
+    $("overdueBtn").classList.toggle("hidden",!overdue.length);
+    $("overdueBtn").textContent=`↪ Перенести (${overdue.length})`;
+    qsa("[data-calendar-view]").forEach(b=>{
+      const active=b.dataset.calendarView===state.calendarView;
+      b.classList.toggle("active",active);b.setAttribute("aria-pressed",String(active));
+    });
+    $("prevWeek").setAttribute("aria-label",state.calendarView==="week"?"Предыдущая неделя":"Предыдущий день");
+    $("nextWeek").setAttribute("aria-label",state.calendarView==="week"?"Следующая неделя":"Следующий день");
+    $("weekGrid").classList.toggle("week-overview",state.calendarView==="week");
+    if(state.calendarView==="week"){renderWeekOverview();return}
     const ds=iso(selectedDate());
     syncWeekStart();
     $("weekLabel").textContent=isToday(ds)?"Сегодня":"";
@@ -579,7 +673,39 @@
     $("prevWeek").classList.toggle("muted-nav",false);
   }
 
-  window.openTaskForDate=ds=>{openTask();$("taskDate").value=ds};
+  function renderWeekOverview(){
+    syncWeekStart();
+    const dates=Array.from({length:7},(_,i)=>{const d=new Date(state.weekStart);d.setDate(d.getDate()+i);return d});
+    const last=dates[6];
+    $("sectionTitle").textContent=`${fmtDate(iso(dates[0]))} — ${fmtDate(iso(last))}`;
+    $("weekLabel").textContent="Неделя · нажми на день, чтобы открыть подробное расписание";
+    const occurrences=expandOccurrences(visibleTasks(),state.weekStart,7);
+    $("weekGrid").innerHTML=dates.map((date,i)=>{
+      const ds=iso(date),tasks=occurrences.filter(t=>t.date===ds);
+      const schedule=(state.schedule||[]).filter(x=>Number(x.day_of_week)===date.getDay()&&x.start_time);
+      const timed=[...tasks.filter(t=>t.start_time).map(t=>({...t,_type:"task"})),
+        ...schedule.map(x=>({...x,_type:"schedule"}))].sort((a,b)=>toMin(a.start_time)-toMin(b.start_time));
+      const total=tasks.reduce((a,t)=>a+minutes(t),0);
+      const level=total>480?"high":total>300?"mid":"low";
+      return `<div class="week-day ${isToday(ds)?"today-day":""}">
+        <button class="week-day-head" type="button" onclick="window.selectCalendarDay('${ds}')" aria-label="Открыть ${esc(dayTitle(ds))}">
+          <span>${dayName(i)} <strong>${date.getDate()}</strong></span><span class="small muted">${tasks.length} задач</span>
+        </button>
+        <div class="load-line"><span class="${level}" style="width:${Math.min(100,total/600*100)}%"></span></div>
+        <div class="week-day-content">
+          ${tasks.filter(t=>!t.start_time).map(taskChipHtml).join("")}
+          ${timed.map(t=>t._type==="schedule"?`<div class="week-schedule-item"><span>${esc(String(t.start_time).slice(0,5))}</span> ${esc(t.title)}</div>`:`<div class="week-task-item">${taskChipHtml(t)}</div>`).join("")}
+          ${!tasks.length&&!schedule.length?'<p class="small muted week-empty">Свободно</p>':""}
+        </div>
+        <button type="button" class="secondary week-add" onclick="window.openTaskForDate('${ds}')">+ Задача</button>
+      </div>`;
+    }).join("");
+  }
+  window.selectCalendarDay=ds=>{
+    state.currentDate=new Date(ds+"T00:00:00");state.calendarView="day";
+    localStorage.setItem("week-calendar-view","day");renderWeek();renderStats();
+  };
+  window.openTaskForDate=ds=>{openTask();$("taskDate").value=ds;updateConflictWarning()};
 
   function applyTheme(theme){
     localStorage.setItem("week-theme",theme);
@@ -600,8 +726,8 @@
     return `<div class="task-chip ${t.priority||"optional"} ${done?"done":""}">
       <input class="check" type="checkbox" ${done?"checked":""} onchange="window.weekToggle('${actionId}',this.checked)">
       <span class="task-title">${esc(t.title)}${t.recurrence?" 🔁":""}</span>
-      <span class="task-meta">${minutes(t)} мин${tracked?` • ⏱${tracked}м`:""}${t.visibility==="shared"?" • Общая":""}</span>
-      <span class="task-actions">${timerButtonHtml(actionId)}<button onclick="window.weekEdit('${actionId}')">✎</button><button onclick="window.weekDelete('${actionId}')">🗑</button></span>
+      <span class="task-meta">${t.start_time?esc(String(t.start_time).slice(0,5))+" • ":""}${minutes(t)} мин${tracked?` • ⏱${tracked}м`:""}${t.visibility==="shared"?" • Общая":""}</span>
+      <span class="task-actions">${checklistSummary(t)}${timerButtonHtml(actionId)}<button onclick="window.weekEdit('${actionId}')" title="Изменить">✎</button><button onclick="window.weekDelete('${actionId}')" title="Удалить">🗑</button></span>
     </div>`;
   }
 
@@ -612,7 +738,7 @@
     return `<article class="task ${t.priority||"optional"} ${done?"done":""}">
       <div><input class="check" type="checkbox" ${done?"checked":""} onchange="event.stopPropagation();window.weekToggle('${actionId}',this.checked)"><span class="task-title">${esc(t.title)}${t.recurrence?" 🔁":""}</span></div>
       <div class="task-meta"><span>${esc(t.start_time.slice(0,5))}</span><span>•</span><span>${minutes(t)} мин</span>${t.fixed_time?"<span>• фикс.</span>":""}${tracked?`<span>• ⏱${tracked}м</span>`:""}</div>
-      <div class="task-actions">${timerButtonHtml(actionId)}<button onclick="window.weekEdit('${actionId}')">✎</button><button onclick="window.weekDelete('${actionId}')">🗑</button>${t.visibility==="shared"?"<span class='small muted'>Общая</span>":""}</div>
+      <div class="task-actions">${checklistSummary(t)}${timerButtonHtml(actionId)}<button onclick="window.weekEdit('${actionId}')" title="Изменить">✎</button><button onclick="window.weekDelete('${actionId}')" title="Удалить">🗑</button>${t.visibility==="shared"?"<span class='small muted'>Общая</span>":""}</div>
     </article>`;
   }
 
@@ -631,10 +757,87 @@
     $("taskRecurring").checked=!!task?.recurrence;
     $("recurrenceBox").classList.toggle("hidden",!task?.recurrence);
     $("taskRecurrence").value=task?.recurrence||"weekly";
+    $("taskChecklistRows").innerHTML="";
+    checklistFor(task).forEach(item=>addChecklistEditorRow(item));
+    $("taskConflictOverride").checked=false;
     qsa('input[name="destination"]').forEach(r=>r.checked=r.value===(task?.visibility==="shared"?"shared":"private"));
     fillFriendPicker(task?.friend_id||state.friends[0]?.id||"");
     updateDestinationUI();
     $("taskModal").classList.remove("hidden");
+    updateConflictWarning();
+  }
+
+  function addChecklistEditorRow(item={},focus=false){
+    if($("taskChecklistRows").children.length>=50){toast("В чек-листе может быть максимум 50 пунктов");return}
+    const row=document.createElement("div");row.className="checklist-edit-row";
+    row.innerHTML=`<input type="checkbox" class="checklist-edit-done" aria-label="Пункт выполнен" ${item.done?"checked":""}>
+      <input type="text" class="checklist-edit-text" maxlength="240" placeholder="Новый пункт" aria-label="Текст пункта" value="${esc(item.text||"")}">
+      <button type="button" class="secondary" data-checklist-remove title="Удалить пункт" aria-label="Удалить пункт">×</button>`;
+    $("taskChecklistRows").append(row);
+    if(focus)row.querySelector(".checklist-edit-text").focus();
+  }
+  function collectChecklist(){
+    return qsa("#taskChecklistRows .checklist-edit-row").map(row=>({
+      text:row.querySelector(".checklist-edit-text").value.trim(),
+      done:row.querySelector(".checklist-edit-done").checked
+    })).filter(x=>x.text).slice(0,50);
+  }
+  window.openChecklist=id=>{
+    const t=state.tasks.find(x=>x.id===id);if(!t)return;
+    $("checklistModal").dataset.taskId=id;
+    $("checklistModalTitle").textContent=t.title;
+    renderChecklistModal(t);
+    $("checklistModal").classList.remove("hidden");
+  };
+  function renderChecklistModal(t){
+    const items=checklistFor(t),done=items.filter(x=>x.done).length;
+    $("checklistProgress").textContent=`Готово: ${done} из ${items.length}`;
+    $("checklistItems").innerHTML=items.map((item,i)=>`<label class="checklist-view-row">
+      <input type="checkbox" data-checklist-toggle="${i}" ${item.done?"checked":""}>
+      <span class="${item.done?"done":""}">${esc(item.text)}</span>
+    </label>`).join("") || '<p class="muted">Пока нет пунктов. Добавь их при редактировании задачи.</p>';
+  }
+  window.toggleChecklistItem=async(index,done)=>{
+    const id=$("checklistModal").dataset.taskId,t=state.tasks.find(x=>x.id===id);
+    const list=checklistFor(t).map(x=>({...x}));if(!t||!list[Number(index)])return;
+    list[Number(index)].done=done;
+    if(state.demo){const original=demoData.tasks.find(x=>x.id===id);if(original)original.checklist=list;saveDemo();loadDemo()}
+    else{
+      const {error}=await sb.from("tasks").update({checklist:list}).eq("id",id);
+      if(error){toast(error.message);renderChecklistModal(t);return}
+      t.checklist=list;await reloadCloud();
+    }
+    const updated=state.tasks.find(x=>x.id===id);
+    if(updated)renderChecklistModal(updated);
+    renderWeek();
+  };
+
+  function openOverdue(){
+    const tasks=ownOverdueTasks();if(!tasks.length)return;
+    $("overdueSelectAll").checked=true;
+    $("overdueList").innerHTML=tasks.map(t=>`<label class="overdue-row"><input type="checkbox" data-overdue-id="${t.id}" checked>
+      <span><strong>${esc(t.title)}</strong><span class="small muted">${fmtDate(t.date)}${t.start_time?" · "+esc(String(t.start_time).slice(0,5)):""}</span></span>
+    </label>`).join("");
+    $("overdueModal").classList.remove("hidden");
+  }
+  async function applyOverdue(){
+    const ids=qsa("#overdueList input:checked[data-overdue-id]").map(x=>x.dataset.overdueId);
+    if(!ids.length){toast("Выбери хотя бы одну задачу");return}
+    $("overdueApply").disabled=true;
+    const date=iso(new Date());
+    try{
+      if(state.demo){
+        for(const t of demoData.tasks)if(ids.includes(t.id)&&t.owner_id===currentUserId()&&t.status==="open"&&!t.recurrence&&t.date<date){t.date=date;t.start_time=null;t.fixed_time=false}
+        saveDemo();loadDemo();
+      }else{
+        const {error}=await sb.from("tasks").update({date,start_time:null,fixed_time:false})
+          .in("id",ids).eq("owner_id",state.user.id).eq("status","open").is("recurrence",null).lt("date",date);
+        if(error){toast(error.message);return}
+        await reloadCloud();
+      }
+      state.currentDate=new Date(date+"T00:00:00");syncWeekStart();
+      $("overdueModal").classList.add("hidden");renderAll();toast(`Перенесено задач: ${ids.length}`);
+    }finally{$("overdueApply").disabled=false}
   }
 
   async function saveTask(e){
@@ -649,10 +852,16 @@
       recurrence:$("taskRecurring").checked?$("taskRecurrence").value:null
     };
     if(!base.title)return;
+    base.checklist=collectChecklist();
+    const overlaps=taskConflicts(base,id);
+    if(overlaps.length&&!$("taskConflictOverride").checked){
+      updateConflictWarning();$("taskConflictWarning").scrollIntoView({behavior:"smooth",block:"nearest"});
+      toast("Проверь пересечения или разреши сохранить задачу");return;
+    }
     localStorage.setItem("week-default-duration", String(base.duration));
     if(state.demo){
       if(id){const t=demoData.tasks.find(x=>x.id===id);if(t)Object.assign(t,base)}
-      else if(dest==="proposal"){const friendId=$("taskFriend").value||state.friends[0]?.id||otherId();demoData.requests.push({id:uid(),from_user_id:currentUserId(),to_user_id:friendId,title:base.title,description:base.description,date:base.date,start_time:base.start_time,duration:base.duration,category:base.category,priority:base.priority,status:"pending",created_at:new Date().toISOString()})}
+      else if(dest==="proposal"){const friendId=$("taskFriend").value||state.friends[0]?.id||otherId();demoData.requests.push({id:uid(),from_user_id:currentUserId(),to_user_id:friendId,title:base.title,description:base.description,date:base.date,start_time:base.start_time,duration:base.duration,category:base.category,priority:base.priority,checklist:base.checklist,status:"pending",created_at:new Date().toISOString()})}
       else {const friendId=$("taskFriend").value||state.friends[0]?.id;demoData.tasks.push({id:uid(),owner_id:currentUserId(),visibility:dest==="shared"?"shared":"private",friend_id:friendId,status:"open",...base});}
       saveDemo();loadDemo();
     }else{
@@ -710,13 +919,13 @@
   }
   window.acceptRequest=async id=>{
     const r=state.requests.find(x=>x.id===id);if(!r)return;
-    if(state.demo){demoData.requests=demoData.requests.filter(x=>x.id!==id);demoData.tasks.push({id:uid(),owner_id:r.from_user_id,visibility:"shared",status:"open",title:r.title,description:r.description,date:r.date,start_time:r.start_time,duration:r.duration,category:r.category,priority:r.priority});saveDemo();loadDemo()}
+    if(state.demo){demoData.requests=demoData.requests.filter(x=>x.id!==id);demoData.tasks.push({id:uid(),owner_id:r.from_user_id,visibility:"shared",status:"open",title:r.title,description:r.description,date:r.date,start_time:r.start_time,duration:r.duration,category:r.category,priority:r.priority,checklist:checklistFor(r)});saveDemo();loadDemo()}
     else{
       // The recipient accepts the proposal, so the shared task must be created
       // with the recipient as owner. RLS policies allow the authenticated user
       // to insert rows only for their own owner_id. The shared visibility makes
       // the task visible to both users.
-      const {data:created,error:taskError}=await sb.from("tasks").insert({owner_id:state.user.id,visibility:"shared",status:"open",title:r.title,description:r.description,date:r.date,start_time:r.start_time,duration:r.duration,category:r.category,priority:r.priority}).select().single();
+      const {data:created,error:taskError}=await sb.from("tasks").insert({owner_id:state.user.id,visibility:"shared",status:"open",title:r.title,description:r.description,date:r.date,start_time:r.start_time,duration:r.duration,category:r.category,priority:r.priority,checklist:checklistFor(r)}).select().single();
       if(taskError){toast(`Не удалось принять предложение: ${taskError.message}`);return}
       const {error:memberError}=await sb.from("task_members").insert([{task_id:created.id,user_id:state.user.id},{task_id:created.id,user_id:r.from_user_id}]);
       if(memberError){await sb.from("tasks").delete().eq("id",created.id).eq("owner_id",state.user.id);toast(`Не удалось связать задачу с друзьями: ${memberError.message}`);return}
@@ -733,13 +942,11 @@
   };
   window.counterRequest=id=>{
     const r=state.requests.find(x=>x.id===id);if(!r)return;
-    $("taskModal").classList.remove("hidden");$("taskModalTitle").textContent="Предложить другое время";
-    $("taskId").value="";$("taskTitle").value=r.title;$("taskDescription").value=r.description||"";
-    $("taskDate").value=r.date;$("taskTime").value=r.start_time?.slice(0,5)||"";$("taskDuration").value=r.duration||60;
-    $("taskCategory").value=r.category||"Другое";$("taskPriority").value=r.priority||"desirable";
+    openTask({...r,id:"",visibility:"private"});
+    $("taskModalTitle").textContent="Предложить другое время";
     qs('input[name="destination"][value="proposal"]').checked=true;
     fillFriendPicker(r.from_user_id);
-    updateDestinationUI();
+    updateDestinationUI();updateConflictWarning();
   };
 
   function updateDestinationUI(){
@@ -887,7 +1094,7 @@
     const file=e.target.files[0];if(!file)return;const reader=new FileReader();reader.onload=()=>{try{const data=JSON.parse(reader.result);if(Array.isArray(data.tasks)){demoData.tasks.push(...data.tasks);saveDemo();loadDemo();renderAll();toast("Импортировано")}else toast("Неверный файл")}catch{toast("Не удалось прочитать JSON")}};reader.readAsText(file);
   }
 
-  setInterval(async()=>{if(!state.demo && state.user){const beforeIncoming=state.requests.length;const beforeStatuses=new Map((state.sentRequests||[]).map(r=>[r.id,r.status]));await reloadCloud();if(state.requests.length>beforeIncoming && "Notification" in window && Notification.permission==="granted" && notificationSettings().enabled)new Notification("week.",{body:"Новое предложение задачи",tag:"week-request"});for(const r of state.sentRequests||[]){const old=beforeStatuses.get(r.id);if(old&&old!==r.status){const name=r.status==="accepted"?"Предложение принято":r.status==="rejected"?"Предложение отклонено":"Предложение обновлено";if("Notification" in window && Notification.permission==="granted" && notificationSettings().enabled)new Notification("week.",{body:name,tag:`week-request-${r.id}`});}}renderRequests();}},60000);
+  setInterval(async()=>{if(!state.demo && state.user){const beforeIncoming=state.requests.length;const beforeStatuses=new Map((state.sentRequests||[]).map(r=>[r.id,r.status]));await reloadCloud();if(state.requests.length>beforeIncoming && "Notification" in window && Notification.permission==="granted" && notificationSettings().enabled)new Notification("week.",{body:"Новое предложение задачи",tag:"week-request"});for(const r of state.sentRequests||[]){const old=beforeStatuses.get(r.id);if(old&&old!==r.status){const name=r.status==="accepted"?"Предложение принято":r.status==="rejected"?"Предложение отклонено":"Предложение обновлено";if("Notification" in window && Notification.permission==="granted" && notificationSettings().enabled)new Notification("week.",{body:name,tag:`week-request-${r.id}`});}}renderRequests();renderWeek();}},60000);
   applyTheme(localStorage.getItem("week-theme")||APP_CFG.theme||"system");
   if(window.matchMedia){window.matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change",()=>{if((localStorage.getItem("week-theme")||APP_CFG.theme)==="system")applyTheme("system")})}
   boot();
