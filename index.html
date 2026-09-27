@@ -12,20 +12,41 @@
   <link rel="icon" type="image/x-icon" href="favicon.ico">
   <link rel="apple-touch-icon" sizes="180x180" href="week-180.png">
   <title>week. — планировщик</title>
+  <script>
+    // Применяем тему до первого кадра: светлый логотип не мелькнёт на тёмном фоне.
+    (function () {
+      var preference = 'system';
+      try { preference = localStorage.getItem('week-theme') || 'system'; } catch (_) {}
+      var dark = preference === 'dark' || (preference !== 'light' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+      document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+      window.__weekSplashStart = Date.now();
+      if (dark) document.querySelector('#themeColor').setAttribute('content', '#121522');
+    })();
+  </script>
+  <style>
+    /* Минимальные стили до загрузки основного CSS: никакой белой вспышки в тёмной теме. */
+    html[data-theme="dark"],html[data-theme="dark"] body,html[data-theme="dark"] .loading-screen{background:#121522}
+    html[data-theme="dark"] .loading-logo-light{display:none}
+    html:not([data-theme="dark"]) .loading-logo-dark{display:none}
+  </style>
   <link rel="stylesheet" href="style.css">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
   <div id="toast" class="toast"></div>
-  <div id="loadingScreen" class="loading-screen" aria-live="polite">
+  <div id="loadingScreen" class="loading-screen" role="status" aria-live="polite" aria-label="week. загружается">
     <div class="loading-card">
-      <img id="loadingLogo" class="loading-logo" src="week.png" alt="week.">
+      <div class="loading-logo-wrap">
+        <img class="loading-logo loading-logo-light" src="week.png" alt="week." decoding="async">
+        <img class="loading-logo loading-logo-dark" src="weekdark.png" alt="" aria-hidden="true" decoding="async">
+      </div>
       <div class="loading-copy">
-        <div class="loading-title">week<span>.</span></div>
-        <p class="loading-subtitle">Собираем твой день…</p>
+        <p class="loading-eyebrow">ТВОЙ ДЕНЬ · ТВОЙ РИТМ</p>
+        <p class="loading-subtitle">Мысль на сегодня</p>
         <p id="loadingMessage" class="loading-message">Пусть сегодня всё идёт по плану.</p>
       </div>
-      <div class="loading-dots" aria-hidden="true"><span></span><span></span><span></span></div>
+      <div class="loading-progress" aria-hidden="true"><span></span></div>
+      <p class="loading-caption">Готовим твоё расписание</p>
     </div>
   </div>
   <div id="authView" class="auth-screen">

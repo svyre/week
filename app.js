@@ -37,7 +37,7 @@
   const APP_CFG=window.APP_CONFIG||{};
   const GRID_START_HOUR=Number(APP_CFG.dayStartHour??0), GRID_END_HOUR=Number(APP_CFG.dayEndHour??24), PX_PER_HOUR=56;
   const LOADING_MIN_MS=5000;
-  const splashStartedAt=Date.now();
+  const splashStartedAt=window.__weekSplashStart||Date.now();
   const loadingMessages=[
     "Начни с одного главного дела — и день уже пойдёт лучше.",
     "Маленький шаг сегодня лучше, чем идеальный план завтра.",
@@ -59,11 +59,13 @@
     return theme==="system"?(window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"):theme;
   }
   function randomLoadingMessage(){
-    return loadingMessages[Math.floor(Math.random()*loadingMessages.length)]||loadingMessages[0];
+    // Один совет на день, меняется на следующий день в часовом поясе пользователя.
+    const now=new Date();
+    const localDay=Math.floor(Date.UTC(now.getFullYear(),now.getMonth(),now.getDate())/86400000);
+    return loadingMessages[(localDay*7)%loadingMessages.length]||loadingMessages[0];
   }
-  function updateLoadingScreen(theme=resolveTheme(localStorage.getItem("week-theme")||APP_CFG.theme||"system")){
-    const logo=$("loadingLogo"), message=$("loadingMessage");
-    if(logo)logo.src=theme==="dark"?"weekdark.png":"week.png";
+  function updateLoadingScreen(){
+    const message=$("loadingMessage");
     if(message && !message.dataset.filled){message.textContent=randomLoadingMessage();message.dataset.filled="1";}
   }
   function finishLoadingScreen(){
