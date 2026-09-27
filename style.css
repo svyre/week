@@ -364,3 +364,49 @@ html[data-theme="dark"] .schedule-track-item span{color:#cbbbe8}
 html[data-theme="dark"] .schedule-track-item.schedule-school,html[data-theme="dark"] .week-schedule-item.schedule-school{background:#243548;border-color:#3c5c7a;border-left:4px solid #80baf8;color:#dfedff}
 html[data-theme="dark"] .schedule-track-item.schedule-school span{color:#a7caec}
 @media(max-width:520px){.task-color-options{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+
+/* week. 1.7: minute-accurate agenda and larger task controls */
+.agenda-track{height:auto!important;position:relative;overflow:visible;background:transparent;display:grid;gap:10px;padding:0 0 8px}
+.agenda-caption{font-size:11px;letter-spacing:.04em;text-transform:uppercase;font-weight:750;color:var(--muted);padding:3px 3px 0}
+.agenda-row{display:grid;grid-template-columns:94px minmax(0,1fr);gap:12px;min-width:0;align-items:stretch}
+.agenda-time{display:flex;flex-direction:column;align-items:flex-end;justify-content:flex-start;gap:2px;padding:15px 2px 0 0;color:var(--text);font-size:14px;font-weight:750;font-variant-numeric:tabular-nums;line-height:1.15;white-space:nowrap}
+.agenda-time-dash{color:var(--muted);font-size:12px;line-height:12px;padding-right:17px}
+.agenda-time time:last-of-type{color:var(--muted);font-weight:600}
+.agenda-next-day{font-size:9px;color:var(--muted);font-weight:600}
+.agenda-row .task,.agenda-row .schedule-track-item{position:relative;left:auto;right:auto;top:auto;bottom:auto;width:100%;height:auto;min-height:0;overflow:visible;transform:none}
+.agenda-row .task:hover{transform:none}
+.agenda-row .schedule-track-item{display:grid;align-content:center;gap:6px;padding:15px 16px;border-radius:16px;box-shadow:0 3px 12px #36215810}
+.agenda-row .schedule-track-item strong{overflow-wrap:anywhere;font-size:14px}
+.agenda-row .schedule-track-item span{display:block;margin:0;font-size:11px}
+.agenda-row .task,.task-chip{display:grid;grid-template-columns:minmax(0,1fr) 44px;gap:10px;align-items:start;min-width:0;padding:12px;border-radius:15px}
+.agenda-row .task{min-height:0}
+.task-content{min-width:0;align-self:center;display:flex;flex-direction:column;align-items:flex-start;gap:7px}
+.task-heading{min-width:0;display:flex;align-items:flex-start;gap:6px;width:100%}
+.task-heading .check{flex:0 0 21px;width:21px;height:21px;margin:1px 0 0;cursor:pointer}
+.task-heading .task-title{min-width:0;flex:1;overflow-wrap:anywhere;font-size:14px;line-height:1.4}
+.agenda-row .task .task-meta,.task-chip .task-meta{width:auto;display:flex;gap:4px;flex-wrap:wrap;margin:0 0 0 27px;font-size:12px;line-height:1.4}
+.task-content .checklist-link{margin:0 0 0 24px;align-self:flex-start;min-height:38px;padding:7px 10px;background:var(--surface2);border-radius:10px;white-space:normal;text-align:left}
+.task-actions,.task-chip .task-actions{grid-column:2;grid-row:1;display:flex;flex-direction:column;align-items:stretch;gap:5px;margin:0;min-width:44px}
+.task-actions .task-action-btn,.task-chip .task-actions .task-action-btn{display:grid;place-items:center;width:44px;height:44px;min-height:44px;padding:0;border-radius:12px;background:var(--surface2);border:1px solid var(--line);color:var(--text);font-size:19px;line-height:1;touch-action:manipulation;cursor:pointer}
+.task-actions .task-action-btn:hover,.task-chip .task-actions .task-action-btn:hover{background:var(--accent2);border-color:#a696ff}
+.task-actions .task-action-btn:focus-visible,.task-chip .task-actions .task-action-btn:focus-visible{outline:3px solid #9875e0;outline-offset:2px}
+.task-actions .task-delete-btn:hover,.task-chip .task-actions .task-delete-btn:hover{color:var(--danger);border-color:var(--danger)}
+.untimed-list{gap:10px}
+.week-day .task-chip{padding:9px;display:grid;grid-template-columns:minmax(0,1fr) 44px;gap:6px}
+.week-day .task-chip .task-title{flex-basis:auto}
+.week-day .task-chip .task-actions{flex-wrap:nowrap}
+html[data-theme="dark"] .agenda-row .schedule-track-item{box-shadow:0 4px 14px #0003}
+html[data-theme="dark"] .task-actions .task-action-btn,html[data-theme="dark"] .task-chip .task-actions .task-action-btn{background:#292e36;color:#e9edf2;border:1px solid #3a4049}
+html[data-theme="dark"] .task-actions .task-action-btn:hover,html[data-theme="dark"] .task-chip .task-actions .task-action-btn:hover{background:#353b45;border-color:#a696ff}
+@media(max-width:700px){
+  .day-col{min-height:0}
+  .agenda-row{grid-template-columns:66px minmax(0,1fr);gap:8px}
+  .agenda-time{font-size:12px;padding:14px 0 0;line-height:1.2}
+  .agenda-time-dash{padding-right:15px}
+  .agenda-row .task,.task-chip{padding:10px;gap:6px}
+  .agenda-row .task .task-title{font-size:14px}
+  .agenda-row .schedule-track-item{padding:13px 12px}
+  .task-actions .task-action-btn,.task-chip .task-actions .task-action-btn{width:44px;height:44px;min-height:44px}
+}
+@media(max-width:350px){.agenda-row{grid-template-columns:60px minmax(0,1fr);gap:5px}.agenda-time{font-size:11px}.agenda-row .task,.task-chip{padding:7px;gap:4px}.task-heading .task-title{font-size:12px}}

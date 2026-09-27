@@ -682,6 +682,14 @@
     return `${weekday[0].toUpperCase()+weekday.slice(1)}, ${date}`;
   }
 
+  function clockTime(totalMinutes){
+    const normalized=((totalMinutes%1440)+1440)%1440;
+    return `${String(Math.floor(normalized/60)).padStart(2,"0")}:${String(normalized%60).padStart(2,"0")}`;
+  }
+  function timeRange(start,end){
+    return `${clockTime(start)}–${clockTime(end)}${end>=1440?" (+1 день)":""}`;
+  }
+
   function renderWeek(){
     const overdue=ownOverdueTasks();
     $("overdueBtn").classList.toggle("hidden",!overdue.length);
@@ -708,39 +716,26 @@
     const total=tasks.reduce((a,t)=>a+minutes(t),0);
     const level=total>480?"high":total>300?"mid":"low";
     const untimed=tasks.filter(t=>!t.start_time);
-    let trackTop=GRID_START_HOUR*60, trackBottom=GRID_END_HOUR*60;
-    if(timed.length||daySchedule.length){
-      const starts=[...timed.map(t=>toMin(t.start_time)),...daySchedule.filter(x=>x.start_time).map(x=>toMin(x.start_time))];
-      const ends=[...timed.map(t=>toMin(t.start_time)+minutes(t)),...daySchedule.filter(x=>x.start_time&&x.end_time).map(x=>toMin(x.end_time))];
-      const minStart=Math.min(...starts);
-      const maxEnd=Math.max(...ends);
-      trackTop=Math.max(GRID_START_HOUR*60,Math.floor(minStart/60)*60-60);
-      trackBottom=Math.min(GRID_END_HOUR*60,Math.ceil(maxEnd/60)*60+60);
-      if(trackBottom-trackTop<180)trackBottom=Math.min(GRID_END_HOUR*60,trackTop+180);
-    }
-    const trackHeight=Math.max(180,Math.round((trackBottom-trackTop)/60*PX_PER_HOUR));
-    const hourCount=Math.max(1,Math.round((trackBottom-trackTop)/60));
-    const hourLines=[...Array(hourCount+1)].map((_,i)=>`<div class="hour-line" style="top:${i*PX_PER_HOUR}px" data-h="${String(Math.floor((trackTop+i*60)/60)).padStart(2,"0")}:00"></div>`).join("");
-    const placed=layoutDayTasks(tasks);
-    const scheduleBlocks=daySchedule.filter(x=>x.start_time&&x.end_time).map(x=>{
-      const start=toMin(x.start_time),end=toMin(x.end_time);
-      const top=Math.max(0,(start-trackTop)/60*PX_PER_HOUR),height=Math.max(24,(end-start)/60*PX_PER_HOUR);
-      return `<div class="schedule-track-item ${x.kind==="school"?"schedule-school":"schedule-extra"}" style="top:${top}px;height:${height}px">${esc(x.title)}<span>${String(x.start_time).slice(0,5)}–${String(x.end_time).slice(0,5)}</span></div>`;
+    // The day view is a chronological agenda. Rows do not depend on task duration,
+    // so even a five-minute task has fully accessible controls on mobile.
+    const events=[
+      ...timed.map(t=>({type:"task",start:toMin(t.start_time),end:toMin(t.start_time)+minutes(t),data:t})),
+      ...daySchedule.filter(x=>x.start_time&&x.end_time).map(x=>({type:"schedule",start:toMin(x.start_time),end:toMin(x.end_time),data:x}))
+    ].sort((a,b)=>a.start-b.start || a.end-b.end || (a.type==="schedule"?-1:1));
+    const agenda=events.map(e=>{
+      const range=`<div class="agenda-time" aria-label="${esc(timeRange(e.start,e.end))}"><time>${clockTime(e.start)}</time><span class="agenda-time-dash">–</span><time>${clockTime(e.end)}</time>${e.end>=1440?'<span class="agenda-next-day">+1 день</span>':""}</div>`;
+      if(e.type==="schedule"){
+        const item=e.data;
+        return `<div class="agenda-row agenda-schedule-row">${range}<div class="schedule-track-item ${item.kind==="school"?"schedule-school":"schedule-extra"}"><strong>${esc(item.title)}</strong><span>${esc(item.kind==="school"?"Занятие":"Дополнительное занятие")}</span></div></div>`;
+      }
+      return `<div class="agenda-row agenda-task-row">${range}${taskBlockHtml(e.data)}</div>`;
     }).join("");
-    const blocks=placed.map(t=>{
-      const top=Math.max(0,(t._start-trackTop)/60*PX_PER_HOUR);
-      const height=Math.max(30,(t._end-t._start)/60*PX_PER_HOUR);
-      const widthPct=100/t._laneCount,leftPct=t._lane*widthPct;
-      return `<div class="track-task" style="top:${top}px;height:${height}px;left:${leftPct}%;width:calc(${widthPct}% - 4px)">${taskBlockHtml(t)}</div>`;
-    }).join("");
-    let nowLine="";
-    if(isToday(ds)){const nowMin=new Date().getHours()*60+new Date().getMinutes();if(nowMin>=trackTop&&nowMin<=trackBottom)nowLine=`<div class="now-line" style="top:${(nowMin-trackTop)/60*PX_PER_HOUR}px"></div>`}
-    const empty=!tasks.length;
+    const empty=!tasks.length && !events.length;
     $("weekGrid").innerHTML=`<div class="day-col ${isToday(ds)?"today-day":""}">
       <div class="day-head"><div><span class="day-name">${dayTitle(ds)}</span><div class="small muted">${isToday(ds)?"Текущий день":""}</div></div><span class="day-date">${fmtDate(ds)}</span></div>
       <div class="day-summary"><div><strong>${tasks.length}</strong><span> ${tasks.length===1?"задача":"задач"}</span></div><div class="load-line"><span class="${level}" style="width:${Math.min(100,total/600*100)}%"></span></div><span class="small muted">${Math.floor(total/60)} ч ${total%60} мин</span></div>
-      ${untimed.length?`<div class="untimed-list">${untimed.map(taskChipHtml).join("")}</div>`:""}
-      ${(empty&&!scheduleBlocks)?`<div class="empty-day"><div class="empty-icon">○</div><strong>День свободен</strong><span>Здесь пока нет задач</span><button class="secondary" onclick="window.openTaskForDate('${ds}')">+ Добавить задачу</button></div>`:`<div class="day-track" style="height:${trackHeight}px">${hourLines}${nowLine}${scheduleBlocks}${blocks}</div>`}
+      ${untimed.length?`<div class="untimed-list"><div class="agenda-caption">Без времени</div>${untimed.map(taskChipHtml).join("")}</div>`:""}
+      ${empty?`<div class="empty-day"><div class="empty-icon">○</div><strong>День свободен</strong><span>Здесь пока нет задач</span><button class="secondary" onclick="window.openTaskForDate('${ds}')">+ Добавить задачу</button></div>`:agenda?`<div class="day-track agenda-track"><div class="agenda-caption">По времени</div>${agenda}</div>`:""}
     </div>`;
     $("prevWeek").classList.toggle("muted-nav",false);
   }
@@ -768,7 +763,7 @@
         <div class="load-line"><span class="${level}" style="width:${Math.min(100,total/600*100)}%"></span></div>
         <div class="week-day-content">
           ${tasks.filter(t=>!t.start_time).map(taskChipHtml).join("")}
-          ${timed.map(t=>t._type==="schedule"?`<div class="week-schedule-item ${t.kind==="school"?"schedule-school":"schedule-extra"}"><span>${esc(String(t.start_time).slice(0,5))}</span> ${esc(t.title)}</div>`:`<div class="week-task-item">${taskChipHtml(t)}</div>`).join("")}
+          ${timed.map(t=>t._type==="schedule"?`<div class="week-schedule-item ${t.kind==="school"?"schedule-school":"schedule-extra"}"><span>${timeRange(toMin(t.start_time),toMin(t.end_time||t.start_time))}</span> ${esc(t.title)}</div>`:`<div class="week-task-item">${taskChipHtml(t)}</div>`).join("")}
           ${!tasks.length&&!schedule.length?'<p class="small muted week-empty">Свободно</p>':""}
         </div>
         <button type="button" class="secondary week-add" onclick="window.openTaskForDate('${ds}')">+ Задача</button>
@@ -798,29 +793,39 @@
   }
   function timerButtonHtml(actionId){
     const running=state.activeTimer && state.activeTimer.taskId===actionId;
-    return `<button onclick="window.toggleTimer('${actionId}')" title="${running?"Остановить таймер":"Запустить таймер"}">${running?"⏹":"⏱"}</button>`;
+    return `<button type="button" class="task-action-btn task-timer-btn" onclick="window.toggleTimer('${actionId}')" aria-label="${running?"Остановить таймер":"Запустить таймер"}" title="${running?"Остановить таймер":"Запустить таймер"}">${running?"⏹":"⏱"}</button>`;
   }
-
+  function taskActionsHtml(actionId){
+    return `<div class="task-actions" role="group" aria-label="Действия с задачей">
+      ${timerButtonHtml(actionId)}
+      <button type="button" class="task-action-btn" onclick="window.weekEdit('${actionId}')" aria-label="Изменить задачу" title="Изменить">✎</button>
+      <button type="button" class="task-action-btn task-delete-btn" onclick="window.weekDelete('${actionId}')" aria-label="Удалить задачу" title="Удалить">🗑</button>
+    </div>`;
+  }
   function taskChipHtml(t){
     const done=t.status==="done";
     const actionId=t.seriesId||t.id;
     const tracked=trackedMinutesFor(actionId);
-    return `<div class="task-chip ${t.priority||"optional"} ${done?"done":""}"${taskColorAttr(t)}>
-      <input class="check" type="checkbox" ${done?"checked":""} onchange="window.weekToggle('${actionId}',this.checked)">
-      <span class="task-title">${esc(t.title)}${t.recurrence?" 🔁":""}</span>
-      <span class="task-meta">${t.start_time?esc(String(t.start_time).slice(0,5))+" • ":""}${minutes(t)} мин${tracked?` • ⏱${tracked}м`:""}${t.visibility==="shared"?" • Общая":""}</span>
-      <span class="task-actions">${checklistSummary(t)}${timerButtonHtml(actionId)}<button onclick="window.weekEdit('${actionId}')" title="Изменить">✎</button><button onclick="window.weekDelete('${actionId}')" title="Удалить">🗑</button></span>
-    </div>`;
+    return `<article class="task-chip ${t.priority||"optional"} ${done?"done":""}"${taskColorAttr(t)}>
+      <div class="task-content">
+        <div class="task-heading"><input class="check" aria-label="Отметить задачу" type="checkbox" ${done?"checked":""} onchange="window.weekToggle('${actionId}',this.checked)"><span class="task-title">${esc(t.title)}${t.recurrence?" 🔁":""}</span></div>
+        <div class="task-meta">${t.start_time?timeRange(toMin(t.start_time),toMin(t.start_time)+minutes(t))+" • ":""}${minutes(t)} мин${tracked?` • ⏱${tracked}м`:""}${t.visibility==="shared"?" • Общая":""}</div>
+        ${checklistSummary(t)}
+      </div>
+      ${taskActionsHtml(actionId)}
+    </article>`;
   }
-
   function taskBlockHtml(t){
     const done=t.status==="done";
     const actionId=t.seriesId||t.id;
     const tracked=trackedMinutesFor(actionId);
     return `<article class="task ${t.priority||"optional"} ${done?"done":""}"${taskColorAttr(t)}>
-      <div><input class="check" type="checkbox" ${done?"checked":""} onchange="event.stopPropagation();window.weekToggle('${actionId}',this.checked)"><span class="task-title">${esc(t.title)}${t.recurrence?" 🔁":""}</span></div>
-      <div class="task-meta"><span>${esc(t.start_time.slice(0,5))}</span><span>•</span><span>${minutes(t)} мин</span>${t.fixed_time?"<span>• фикс.</span>":""}${tracked?`<span>• ⏱${tracked}м</span>`:""}</div>
-      <div class="task-actions">${checklistSummary(t)}${timerButtonHtml(actionId)}<button onclick="window.weekEdit('${actionId}')" title="Изменить">✎</button><button onclick="window.weekDelete('${actionId}')" title="Удалить">🗑</button>${t.visibility==="shared"?"<span class='small muted'>Общая</span>":""}</div>
+      <div class="task-content">
+        <div class="task-heading"><input class="check" aria-label="Отметить задачу" type="checkbox" ${done?"checked":""} onchange="event.stopPropagation();window.weekToggle('${actionId}',this.checked)"><span class="task-title">${esc(t.title)}${t.recurrence?" 🔁":""}</span></div>
+        <div class="task-meta"><span>${minutes(t)} мин</span>${t.fixed_time?"<span>• фикс.</span>":""}${tracked?`<span>• ⏱${tracked}м</span>`:""}${t.visibility==="shared"?"<span>• Общая</span>":""}</div>
+        ${checklistSummary(t)}
+      </div>
+      ${taskActionsHtml(actionId)}
     </article>`;
   }
 
