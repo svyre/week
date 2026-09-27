@@ -722,33 +722,48 @@
       ...timed.map(t=>({type:"task",start:toMin(t.start_time),end:toMin(t.start_time)+minutes(t),data:t})),
       ...daySchedule.filter(x=>x.start_time&&x.end_time).map(x=>({type:"schedule",start:toMin(x.start_time),end:toMin(x.end_time),data:x}))
     ].sort((a,b)=>a.start-b.start || a.end-b.end || (a.type==="schedule"?-1:1));
-    // Build a continuous day: occupied rows + explicit free intervals. A running
-    // cursor tracks the latest end, so overlapping tasks never create false gaps.
+    // Keep an hour of context around the first/last event without displaying
+    // the night. An early or late task expands the range so it remains visible.
     const agendaEntries=[];
-    const dayStart=Math.max(0,Math.min(1440,GRID_START_HOUR*60));
-    const dayEnd=Math.max(dayStart,Math.min(1440,GRID_END_HOUR*60));
-    let occupiedUntil=dayStart;
-    for(const event of events){
-      if(event.start>occupiedUntil && occupiedUntil<dayEnd){
-        agendaEntries.push({type:"free",start:occupiedUntil,end:Math.min(event.start,dayEnd)});
+    if(events.length){
+      const first=events[0].start;
+      const last=Math.max(...events.map(e=>e.end));
+      const dayStart=Math.max(0,first<7*60?first-60:Math.max(7*60,first-60));
+      const dayEnd=Math.min(1440,last>23*60?last+60:Math.min(23*60,last+60));
+      // occupiedUntil is the end of the union of all occupied intervals.
+      // Overlapping tasks must not create imaginary gaps.
+      let occupiedUntil=dayStart;
+      for(const event of events){
+        if(event.start>occupiedUntil){
+          agendaEntries.push({type:"free",start:occupiedUntil,end:event.start});
+        }
+        agendaEntries.push(event);
+        occupiedUntil=Math.max(occupiedUntil,event.end);
       }
-      agendaEntries.push(event);
-      occupiedUntil=Math.max(occupiedUntil,event.end);
+      if(occupiedUntil<dayEnd){
+        agendaEntries.push({type:"free",start:occupiedUntil,end:dayEnd});
+      }
     }
-    if(occupiedUntil<dayEnd){
-      agendaEntries.push({type:"free",start:occupiedUntil,end:dayEnd});
-    }
-    const agenda=agendaEntries.map(e=>{
+    const agenda=agendaEntries.map((e,index)=>{
       if(e.type==="free"){
         const duration=e.end-e.start;
-        const label=duration>=60?`${Math.floor(duration/60)} ч${duration%60?` ${duration%60} мин`:""}`:`${duration} мин`;
-        // Visual height reflects real duration, capped for long intervals.
-        // Tasks keep full-size action buttons regardless of their duration.
-        const height=Math.round(Math.max(46,Math.min(220,40+duration*.65)));
-        const finish=e.end===1440?"24:00":clockTime(e.end);
-        return `<div class="agenda-row agenda-free-row" aria-label="Свободно с ${clockTime(e.start)} до ${finish}">
-          <div class="agenda-time agenda-free-time"><time>${clockTime(e.start)}</time><span class="agenda-time-dash">–</span><time>${finish}</time></div>
-          <div class="agenda-free-space" style="min-height:${height}px"><div class="agenda-free-label"><span class="agenda-free-indicator" aria-hidden="true"></span>Свободно <span class="agenda-free-duration">· ${label}</span></div></div>
+        // Blank vertical space represents the interval. No "free" label is
+        // drawn; hour markers continue the timeline between task cards.
+        const height=Math.round(Math.max(24,Math.min(420,duration*.86)));
+        const marks=[];
+        const addMark=(minute,offset,edge="")=>{
+          const label=minute===1440?"24:00":clockTime(minute);
+          marks.push(`<div class="agenda-hour-mark ${edge}" style="top:${offset}px"><time>${label}</time><span aria-hidden="true"></span></div>`);
+        };
+        if(index===0)addMark(e.start,0,"agenda-hour-first");
+        for(let minute=Math.ceil(e.start/60)*60;minute<e.end;minute+=60){
+          if(minute<=e.start)continue;
+          const offset=Math.round((minute-e.start)/duration*height);
+          if(offset>15&&height-offset>15)addMark(minute,offset);
+        }
+        if(index===agendaEntries.length-1)addMark(e.end,height,"agenda-hour-last");
+        return `<div class="agenda-row agenda-free-row" style="height:${height}px" data-gap-minutes="${duration}" aria-label="Промежуток ${clockTime(e.start)}–${e.end===1440?"24:00":clockTime(e.end)}">
+          <div class="agenda-free-space" aria-hidden="true"></div>${marks.join("")}
         </div>`;
       }
       const range=`<div class="agenda-time" aria-label="${esc(timeRange(e.start,e.end))}"><time>${clockTime(e.start)}</time><span class="agenda-time-dash">–</span><time>${clockTime(e.end)}</time>${e.end>=1440?'<span class="agenda-next-day">+1 день</span>':""}</div>`;
@@ -763,7 +778,7 @@
       <div class="day-head"><div><span class="day-name">${dayTitle(ds)}</span><div class="small muted">${isToday(ds)?"Текущий день":""}</div></div><span class="day-date">${fmtDate(ds)}</span></div>
       <div class="day-summary"><div><strong>${tasks.length}</strong><span> ${tasks.length===1?"задача":"задач"}</span></div><div class="load-line"><span class="${level}" style="width:${Math.min(100,total/600*100)}%"></span></div><span class="small muted">${Math.floor(total/60)} ч ${total%60} мин</span></div>
       ${untimed.length?`<div class="untimed-list"><div class="agenda-caption">Без времени</div>${untimed.map(taskChipHtml).join("")}</div>`:""}
-      ${empty?`<div class="empty-day"><div class="empty-icon">○</div><strong>День свободен</strong><span>Здесь пока нет задач</span><button class="secondary" onclick="window.openTaskForDate('${ds}')">+ Добавить задачу</button></div>`:`<div class="day-track agenda-track"><div class="agenda-caption">Занятость и свободные промежутки</div>${agenda}</div>`}
+      ${empty?`<div class="empty-day"><div class="empty-icon">○</div><strong>Нет дел на этот день</strong><span>Здесь пока нет задач</span><button class="secondary" onclick="window.openTaskForDate('${ds}')">+ Добавить задачу</button></div>`:`<div class="day-track agenda-track"><div class="agenda-caption">Расписание по времени</div>${agenda || '<div class="agenda-untimed-only">Задачи без указания времени находятся выше</div>'}</div>`}
     </div>`;
     $("prevWeek").classList.toggle("muted-nav",false);
   }

@@ -431,3 +431,29 @@ html[data-theme="dark"] .agenda-free-indicator{background:#b7a4f6}
  .agenda-free-label{font-size:11px;gap:3px}
 }
 @media(max-width:350px){.agenda-row.agenda-free-row{gap:5px}.agenda-free-space{margin-left:3px;padding-left:9px}.agenda-free-label{font-size:10px}}
+
+
+/* week. 1.9: continuous time ruler; free intervals are unlabelled empty space */
+.agenda-track{gap:0}
+.agenda-track>.agenda-caption{padding:3px 4px 14px}
+.agenda-row.agenda-free-row{display:block;position:relative;min-height:24px;margin:0;padding:0}
+.agenda-free-space{position:absolute;left:calc(94px + 12px + 10px);right:0;top:0;bottom:0;min-width:0;display:block;margin:0;padding:0;border-left:2px solid var(--line);background:transparent}
+.agenda-hour-mark{position:absolute;left:0;right:0;display:grid;grid-template-columns:94px minmax(0,1fr);gap:12px;align-items:center;min-height:1px;pointer-events:none;transform:translateY(-50%);color:var(--muted);font-size:12px;font-weight:600;font-variant-numeric:tabular-nums}
+.agenda-hour-mark time{display:block;justify-self:end;padding-right:2px;white-space:nowrap;line-height:1.15}
+.agenda-hour-mark span{display:block;border-top:1px solid var(--line);height:1px;margin-left:10px;opacity:.7}
+.agenda-hour-mark.agenda-hour-first{transform:translateY(0)}
+.agenda-hour-mark.agenda-hour-last{transform:translateY(-100%)}
+.agenda-row.agenda-free-row .agenda-time{display:none}
+.agenda-untimed-only{padding:22px 14px;color:var(--muted);font-size:13px;text-align:center}
+html[data-theme="dark"] .agenda-free-space{background:transparent;border-color:#47414f}
+html[data-theme="dark"] .agenda-hour-mark span{border-color:#47414f}
+@media(max-width:700px){
+  .agenda-free-space{left:calc(66px + 8px + 7px)}
+  .agenda-hour-mark{grid-template-columns:66px minmax(0,1fr);gap:8px;font-size:11px}
+  .agenda-hour-mark span{margin-left:7px}
+}
+@media(max-width:350px){
+  .agenda-free-space{left:calc(60px + 5px + 5px)}
+  .agenda-hour-mark{grid-template-columns:60px minmax(0,1fr);gap:5px;font-size:10px}
+  .agenda-hour-mark span{margin-left:5px}
+}
