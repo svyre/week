@@ -559,3 +559,9 @@ create trigger shared_task_member_added_notification after insert on public.task
 -- week. 1.1: compact checklists, shared tasks and proposals (safe to run again).
 alter table public.tasks add column if not exists checklist jsonb not null default '[]'::jsonb;
 alter table public.task_requests add column if not exists checklist jsonb not null default '[]'::jsonb;
+
+
+-- week. 1.6: цвета задач. Запустить в Supabase SQL Editor для существующей базы.
+-- Маленькое текстовое поле, отдельная таблица не нужна.
+alter table public.tasks add column if not exists color text not null default 'default';
+alter table public.task_requests add column if not exists color text not null default 'default';

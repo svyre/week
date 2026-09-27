@@ -315,3 +315,52 @@ html[data-theme="dark"] .profile-trigger:hover,html[data-theme="dark"] .profile-
   .profile-mobile-label{display:none}
   .sidebar-bottom .profile-box.active{background:var(--surface2);border-color:var(--line)}
 }
+
+
+/* week. 1.6: task colors and schedule cards */
+.task-color-fieldset{margin:17px 0 12px;border:1px solid var(--line);border-radius:15px;padding:12px 13px 10px;min-width:0}
+.task-color-fieldset legend{padding:0 5px;font-size:14px;font-weight:750}
+.task-color-options{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.task-color-option{display:flex;align-items:center;gap:7px;margin:0;min-width:0;border:1px solid var(--line);padding:8px 7px;border-radius:11px;background:var(--surface);font-weight:600;font-size:11px;cursor:pointer;position:relative}
+.task-color-option:has(input:checked){border-color:#8e7cf6;box-shadow:0 0 0 2px #8e7cf620}
+.task-color-option:focus-within{outline:2px solid #8e7cf6;outline-offset:2px}
+.task-color-option input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+.task-color-swatch{width:17px;height:17px;border-radius:6px;flex:0 0 17px;background:var(--swatch,#fff);border:1px solid #00000020}
+.task-color-name{overflow-wrap:anywhere}
+.task-color-swatch[data-palette="default"]{--swatch:#f8f8f8}
+.task-color-swatch[data-palette="lavender"]{--swatch:#b8a3f2}
+.task-color-swatch[data-palette="blue"]{--swatch:#8ec2f5}
+.task-color-swatch[data-palette="mint"]{--swatch:#84d8bf}
+.task-color-swatch[data-palette="amber"]{--swatch:#f4cd75}
+.task-color-swatch[data-palette="coral"]{--swatch:#f3a28b}
+.task-color-swatch[data-palette="rose"]{--swatch:#ecacce}
+.task-color-swatch[data-palette="slate"]{--swatch:#adb7c6}
+.task-color-tip{margin:8px 0 0}
+.task[data-color],.task-chip[data-color]{background:var(--task-bg);border-left:4px solid var(--task-line)}
+.task[data-color="lavender"],.task-chip[data-color="lavender"],.request-card[data-color="lavender"]{--task-bg:#f0eaff;--task-line:#9272d2}
+.task[data-color="blue"],.task-chip[data-color="blue"],.request-card[data-color="blue"]{--task-bg:#e8f3ff;--task-line:#5b9edc}
+.task[data-color="mint"],.task-chip[data-color="mint"],.request-card[data-color="mint"]{--task-bg:#e5f8f0;--task-line:#4daf8f}
+.task[data-color="amber"],.task-chip[data-color="amber"],.request-card[data-color="amber"]{--task-bg:#fff5da;--task-line:#d8a93e}
+.task[data-color="coral"],.task-chip[data-color="coral"],.request-card[data-color="coral"]{--task-bg:#fff0e9;--task-line:#d77d68}
+.task[data-color="rose"],.task-chip[data-color="rose"],.request-card[data-color="rose"]{--task-bg:#fcecf5;--task-line:#cb7baf}
+.task[data-color="slate"],.task-chip[data-color="slate"],.request-card[data-color="slate"]{--task-bg:#eef2f6;--task-line:#8491a5}
+html[data-theme="dark"] .task[data-color="lavender"],html[data-theme="dark"] .task-chip[data-color="lavender"],html[data-theme="dark"] .request-card[data-color="lavender"]{--task-bg:#302943;--task-line:#b9a0f9}
+html[data-theme="dark"] .task[data-color="blue"],html[data-theme="dark"] .task-chip[data-color="blue"],html[data-theme="dark"] .request-card[data-color="blue"]{--task-bg:#213247;--task-line:#80baf8}
+html[data-theme="dark"] .task[data-color="mint"],html[data-theme="dark"] .task-chip[data-color="mint"],html[data-theme="dark"] .request-card[data-color="mint"]{--task-bg:#203b33;--task-line:#80d7b4}
+html[data-theme="dark"] .task[data-color="amber"],html[data-theme="dark"] .task-chip[data-color="amber"],html[data-theme="dark"] .request-card[data-color="amber"]{--task-bg:#423622;--task-line:#f1c66d}
+html[data-theme="dark"] .task[data-color="coral"],html[data-theme="dark"] .task-chip[data-color="coral"],html[data-theme="dark"] .request-card[data-color="coral"]{--task-bg:#42302e;--task-line:#f1a18b}
+html[data-theme="dark"] .task[data-color="rose"],html[data-theme="dark"] .task-chip[data-color="rose"],html[data-theme="dark"] .request-card[data-color="rose"]{--task-bg:#412c3c;--task-line:#eda6d0}
+html[data-theme="dark"] .task[data-color="slate"],html[data-theme="dark"] .task-chip[data-color="slate"],html[data-theme="dark"] .request-card[data-color="slate"]{--task-bg:#303943;--task-line:#aab8ca}
+html[data-theme="dark"] .task[data-color],html[data-theme="dark"] .task-chip[data-color]{background:var(--task-bg);border-left:4px solid var(--task-line)}
+.request-card[data-color]{border-left:4px solid var(--task-line,#8e7cf6)}
+.schedule-track-item{border:1px solid #b9a7e7;border-left:4px solid #9b83dc;background:#eee8fb;color:#3d315f;opacity:1;box-shadow:0 3px 12px #36215816;font-weight:700;line-height:1.35}
+.schedule-track-item span{color:#655589;font-weight:550}
+.schedule-track-item.schedule-school{border-color:#aacbed;border-left-color:#6fa9df;background:#eaf3ff;color:#264d72}
+.schedule-track-item.schedule-school span{color:#49769e}
+.week-schedule-item{background:#eee8fb;border-left:4px solid #9b83dc;color:#3d315f;font-weight:650}
+.week-schedule-item.schedule-school{background:#eaf3ff;border-left-color:#6fa9df;color:#264d72}
+html[data-theme="dark"] .schedule-track-item,html[data-theme="dark"] .week-schedule-item{background:#332c45;border-color:#62527c;border-left:4px solid #b9a0f9;color:#f1e9ff}
+html[data-theme="dark"] .schedule-track-item span{color:#cbbbe8}
+html[data-theme="dark"] .schedule-track-item.schedule-school,html[data-theme="dark"] .week-schedule-item.schedule-school{background:#243548;border-color:#3c5c7a;border-left:4px solid #80baf8;color:#dfedff}
+html[data-theme="dark"] .schedule-track-item.schedule-school span{color:#a7caec}
+@media(max-width:520px){.task-color-options{grid-template-columns:repeat(2,minmax(0,1fr))}}

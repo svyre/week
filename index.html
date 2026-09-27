@@ -269,6 +269,20 @@
           <label>Категория<select id="taskCategory"><option>Школа</option><option>Репетитор</option><option>ОШ</option><option>Спорт</option><option>Личное</option><option>Другое</option></select></label>
           <label>Приоритет<select id="taskPriority"><option value="mandatory">Обязательная</option><option value="desirable">Желательная</option><option value="optional">Необязательная</option></select></label>
         </div>
+        <fieldset class="task-color-fieldset">
+          <legend>Цвет задачи</legend>
+          <div class="task-color-options" role="radiogroup" aria-label="Цвет задачи">
+            <label class="task-color-option" title="Обычно"><input type="radio" name="taskColor" value="default" checked><span class="task-color-swatch" data-palette="default" aria-hidden="true"></span><span class="task-color-name">Обычно</span></label>
+            <label class="task-color-option" title="Лавандовый"><input type="radio" name="taskColor" value="lavender" ><span class="task-color-swatch" data-palette="lavender" aria-hidden="true"></span><span class="task-color-name">Лавандовый</span></label>
+            <label class="task-color-option" title="Голубой"><input type="radio" name="taskColor" value="blue" ><span class="task-color-swatch" data-palette="blue" aria-hidden="true"></span><span class="task-color-name">Голубой</span></label>
+            <label class="task-color-option" title="Мятный"><input type="radio" name="taskColor" value="mint" ><span class="task-color-swatch" data-palette="mint" aria-hidden="true"></span><span class="task-color-name">Мятный</span></label>
+            <label class="task-color-option" title="Жёлтый"><input type="radio" name="taskColor" value="amber" ><span class="task-color-swatch" data-palette="amber" aria-hidden="true"></span><span class="task-color-name">Жёлтый</span></label>
+            <label class="task-color-option" title="Коралловый"><input type="radio" name="taskColor" value="coral" ><span class="task-color-swatch" data-palette="coral" aria-hidden="true"></span><span class="task-color-name">Коралловый</span></label>
+            <label class="task-color-option" title="Розовый"><input type="radio" name="taskColor" value="rose" ><span class="task-color-swatch" data-palette="rose" aria-hidden="true"></span><span class="task-color-name">Розовый</span></label>
+            <label class="task-color-option" title="Серый"><input type="radio" name="taskColor" value="slate" ><span class="task-color-swatch" data-palette="slate" aria-hidden="true"></span><span class="task-color-name">Серый</span></label>
+          </div>
+          <p class="small muted task-color-tip">Цвет виден в календаре. Приоритет остаётся отдельным полем.</p>
+        </fieldset>
         <div class="check-row">
           <label><input id="taskFixed" type="checkbox"> Фиксированное время</label>
           <label><input id="taskRecurring" type="checkbox"> Повторять</label>

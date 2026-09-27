@@ -725,7 +725,7 @@
     const scheduleBlocks=daySchedule.filter(x=>x.start_time&&x.end_time).map(x=>{
       const start=toMin(x.start_time),end=toMin(x.end_time);
       const top=Math.max(0,(start-trackTop)/60*PX_PER_HOUR),height=Math.max(24,(end-start)/60*PX_PER_HOUR);
-      return `<div class="schedule-track-item" style="top:${top}px;height:${height}px">${esc(x.title)}<span>${String(x.start_time).slice(0,5)}–${String(x.end_time).slice(0,5)}</span></div>`;
+      return `<div class="schedule-track-item ${x.kind==="school"?"schedule-school":"schedule-extra"}" style="top:${top}px;height:${height}px">${esc(x.title)}<span>${String(x.start_time).slice(0,5)}–${String(x.end_time).slice(0,5)}</span></div>`;
     }).join("");
     const blocks=placed.map(t=>{
       const top=Math.max(0,(t._start-trackTop)/60*PX_PER_HOUR);
@@ -768,7 +768,7 @@
         <div class="load-line"><span class="${level}" style="width:${Math.min(100,total/600*100)}%"></span></div>
         <div class="week-day-content">
           ${tasks.filter(t=>!t.start_time).map(taskChipHtml).join("")}
-          ${timed.map(t=>t._type==="schedule"?`<div class="week-schedule-item"><span>${esc(String(t.start_time).slice(0,5))}</span> ${esc(t.title)}</div>`:`<div class="week-task-item">${taskChipHtml(t)}</div>`).join("")}
+          ${timed.map(t=>t._type==="schedule"?`<div class="week-schedule-item ${t.kind==="school"?"schedule-school":"schedule-extra"}"><span>${esc(String(t.start_time).slice(0,5))}</span> ${esc(t.title)}</div>`:`<div class="week-task-item">${taskChipHtml(t)}</div>`).join("")}
           ${!tasks.length&&!schedule.length?'<p class="small muted week-empty">Свободно</p>':""}
         </div>
         <button type="button" class="secondary week-add" onclick="window.openTaskForDate('${ds}')">+ Задача</button>
@@ -789,6 +789,13 @@
     updateLoadingScreen(resolved);
   }
 
+  // Fixed palette instead of arbitrary CSS or a separate color table.
+  const TASK_COLORS=new Set(["default","lavender","blue","mint","amber","coral","rose","slate"]);
+  function taskColor(value){return TASK_COLORS.has(value)?value:"default"}
+  function taskColorAttr(task){
+    const value=taskColor(task.color);
+    return value==="default"?"":` data-color="${value}"`;
+  }
   function timerButtonHtml(actionId){
     const running=state.activeTimer && state.activeTimer.taskId===actionId;
     return `<button onclick="window.toggleTimer('${actionId}')" title="${running?"Остановить таймер":"Запустить таймер"}">${running?"⏹":"⏱"}</button>`;
@@ -798,7 +805,7 @@
     const done=t.status==="done";
     const actionId=t.seriesId||t.id;
     const tracked=trackedMinutesFor(actionId);
-    return `<div class="task-chip ${t.priority||"optional"} ${done?"done":""}">
+    return `<div class="task-chip ${t.priority||"optional"} ${done?"done":""}"${taskColorAttr(t)}>
       <input class="check" type="checkbox" ${done?"checked":""} onchange="window.weekToggle('${actionId}',this.checked)">
       <span class="task-title">${esc(t.title)}${t.recurrence?" 🔁":""}</span>
       <span class="task-meta">${t.start_time?esc(String(t.start_time).slice(0,5))+" • ":""}${minutes(t)} мин${tracked?` • ⏱${tracked}м`:""}${t.visibility==="shared"?" • Общая":""}</span>
@@ -810,7 +817,7 @@
     const done=t.status==="done";
     const actionId=t.seriesId||t.id;
     const tracked=trackedMinutesFor(actionId);
-    return `<article class="task ${t.priority||"optional"} ${done?"done":""}">
+    return `<article class="task ${t.priority||"optional"} ${done?"done":""}"${taskColorAttr(t)}>
       <div><input class="check" type="checkbox" ${done?"checked":""} onchange="event.stopPropagation();window.weekToggle('${actionId}',this.checked)"><span class="task-title">${esc(t.title)}${t.recurrence?" 🔁":""}</span></div>
       <div class="task-meta"><span>${esc(t.start_time.slice(0,5))}</span><span>•</span><span>${minutes(t)} мин</span>${t.fixed_time?"<span>• фикс.</span>":""}${tracked?`<span>• ⏱${tracked}м</span>`:""}</div>
       <div class="task-actions">${checklistSummary(t)}${timerButtonHtml(actionId)}<button onclick="window.weekEdit('${actionId}')" title="Изменить">✎</button><button onclick="window.weekDelete('${actionId}')" title="Удалить">🗑</button>${t.visibility==="shared"?"<span class='small muted'>Общая</span>":""}</div>
@@ -828,6 +835,8 @@
     $("taskDeadline").value=task?.deadline?new Date(task.deadline).toISOString().slice(0,16):"";
     $("taskCategory").value=task?.category||"Школа";
     $("taskPriority").value=task?.priority||"mandatory";
+    const selectedColor=taskColor(task?.color);
+    qsa('input[name="taskColor"]').forEach(input=>input.checked=input.value===selectedColor);
     $("taskFixed").checked=!!task?.fixed_time;
     $("taskRecurring").checked=!!task?.recurrence;
     $("recurrenceBox").classList.toggle("hidden",!task?.recurrence);
@@ -923,7 +932,8 @@
       title:$("taskTitle").value.trim(),description:$("taskDescription").value.trim()||null,
       date:$("taskDate").value,start_time:$("taskTime").value||null,
       duration:Number($("taskDuration").value)||60,deadline:$("taskDeadline").value?new Date($("taskDeadline").value).toISOString():null,
-      category:$("taskCategory").value,priority:$("taskPriority").value,fixed_time:$("taskFixed").checked,
+      category:$("taskCategory").value,priority:$("taskPriority").value,
+      color:taskColor(qs('input[name="taskColor"]:checked')?.value),fixed_time:$("taskFixed").checked,
       recurrence:$("taskRecurring").checked?$("taskRecurrence").value:null
     };
     if(!base.title)return;
@@ -936,7 +946,7 @@
     localStorage.setItem("week-default-duration", String(base.duration));
     if(state.demo){
       if(id){const t=demoData.tasks.find(x=>x.id===id);if(t)Object.assign(t,base)}
-      else if(dest==="proposal"){const friendId=$("taskFriend").value||state.friends[0]?.id||otherId();demoData.requests.push({id:uid(),from_user_id:currentUserId(),to_user_id:friendId,title:base.title,description:base.description,date:base.date,start_time:base.start_time,duration:base.duration,category:base.category,priority:base.priority,checklist:base.checklist,status:"pending",created_at:new Date().toISOString()})}
+      else if(dest==="proposal"){const friendId=$("taskFriend").value||state.friends[0]?.id||otherId();demoData.requests.push({id:uid(),from_user_id:currentUserId(),to_user_id:friendId,title:base.title,description:base.description,date:base.date,start_time:base.start_time,duration:base.duration,category:base.category,priority:base.priority,color:base.color,checklist:base.checklist,status:"pending",created_at:new Date().toISOString()})}
       else {const friendId=$("taskFriend").value||state.friends[0]?.id;demoData.tasks.push({id:uid(),owner_id:currentUserId(),visibility:dest==="shared"?"shared":"private",friend_id:friendId,status:"open",...base});}
       saveDemo();loadDemo();
     }else{
@@ -985,7 +995,7 @@
   function renderRequests(){
     const el=$("requestsList");
     if(!state.requests.length){el.innerHTML='<p class="muted">Новых предложений нет.</p>';return}
-    el.innerHTML=state.requests.map(r=>`<div class="request-card">
+    el.innerHTML=state.requests.map(r=>`<div class="request-card"${taskColorAttr(r)}>
       <strong>${esc(r.title)}</strong>
       <div class="task-meta">${fmtDate(r.date)}${r.start_time?" • "+r.start_time.slice(0,5):""} • ${r.duration||60} мин • ${esc(r.category||"Другое")}</div>
       <p>${esc(r.description||"Без описания")}</p>
@@ -994,13 +1004,13 @@
   }
   window.acceptRequest=async id=>{
     const r=state.requests.find(x=>x.id===id);if(!r)return;
-    if(state.demo){demoData.requests=demoData.requests.filter(x=>x.id!==id);demoData.tasks.push({id:uid(),owner_id:r.from_user_id,visibility:"shared",status:"open",title:r.title,description:r.description,date:r.date,start_time:r.start_time,duration:r.duration,category:r.category,priority:r.priority,checklist:checklistFor(r)});saveDemo();loadDemo()}
+    if(state.demo){demoData.requests=demoData.requests.filter(x=>x.id!==id);demoData.tasks.push({id:uid(),owner_id:r.from_user_id,visibility:"shared",status:"open",title:r.title,description:r.description,date:r.date,start_time:r.start_time,duration:r.duration,category:r.category,priority:r.priority,color:taskColor(r.color),checklist:checklistFor(r)});saveDemo();loadDemo()}
     else{
       // The recipient accepts the proposal, so the shared task must be created
       // with the recipient as owner. RLS policies allow the authenticated user
       // to insert rows only for their own owner_id. The shared visibility makes
       // the task visible to both users.
-      const {data:created,error:taskError}=await sb.from("tasks").insert({owner_id:state.user.id,visibility:"shared",status:"open",title:r.title,description:r.description,date:r.date,start_time:r.start_time,duration:r.duration,category:r.category,priority:r.priority,checklist:checklistFor(r)}).select().single();
+      const {data:created,error:taskError}=await sb.from("tasks").insert({owner_id:state.user.id,visibility:"shared",status:"open",title:r.title,description:r.description,date:r.date,start_time:r.start_time,duration:r.duration,category:r.category,priority:r.priority,color:taskColor(r.color),checklist:checklistFor(r)}).select().single();
       if(taskError){toast(`Не удалось принять предложение: ${taskError.message}`);return}
       const {error:memberError}=await sb.from("task_members").insert([{task_id:created.id,user_id:state.user.id},{task_id:created.id,user_id:r.from_user_id}]);
       if(memberError){await sb.from("tasks").delete().eq("id",created.id).eq("owner_id",state.user.id);toast(`Не удалось связать задачу с друзьями: ${memberError.message}`);return}
