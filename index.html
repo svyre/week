@@ -80,13 +80,15 @@
         <button class="nav-btn" data-section="friends"><span>♧</span><span>Друзья</span><span id="friendBadge" class="badge hidden">0</span></button>
         <button class="nav-btn" data-section="templates"><span>✦</span><span>Шаблоны</span></button>
         <button class="nav-btn" data-section="stats"><span>↗</span><span>Статистика</span></button>
-        <button class="nav-btn" data-section="settings"><span>⚙</span><span>Настройки</span></button>
       </nav>
-      <div class="profile-box">
-        <div class="avatar" id="avatar">?</div>
-        <div><strong id="profileName">Пользователь</strong><div class="small muted" id="profileEmail"></div></div>
+      <div class="sidebar-bottom">
+        <button type="button" id="profileBtn" class="profile-box profile-trigger" aria-label="Открыть профиль">
+          <span class="avatar" id="avatar">?</span>
+          <span class="profile-text"><strong id="profileName">Пользователь</strong><span class="small muted" id="profileEmail"></span></span>
+          <span class="profile-mobile-label">Профиль</span>
+        </button>
+        <button type="button" id="settingsBtn" class="settings-gear" aria-label="Настройки" title="Настройки"><span aria-hidden="true">⚙</span><span class="settings-mobile-label">Настройки</span></button>
       </div>
-      <button id="logoutBtn" class="secondary full">Выйти</button>
     </aside>
 
     <main class="main">
@@ -161,30 +163,43 @@
         <div class="panel"><h2>По категориям</h2><div id="categoryStats"></div></div>
       </section>
 
+      <section id="profileSection" class="section hidden">
+        <div class="panel settings-panel profile-panel">
+          <h2>Мой профиль</h2>
+          <p class="small muted">Твои данные и личное расписание.</p>
+          <label>Имя<input id="settingsName" autocomplete="name"></label>
+          <label>Username<input id="settingsUsername" placeholder="например vadim" maxlength="24" autocomplete="off"><span class="small muted">По нему тебя смогут найти друзья.</span></label>
+          <button id="saveProfileBtn" class="primary">Сохранить профиль</button>
+          <div class="settings-card">
+            <div><strong>Моё расписание</strong><p class="small muted">Уроки и дополнительные занятия, которые week. учитывает при планировании.</p></div>
+            <button id="editScheduleBtn" class="secondary">Изменить расписание</button>
+          </div>
+          <button id="logoutBtn" class="secondary profile-logout">Выйти из аккаунта</button>
+        </div>
+      </section>
+
       <section id="settingsSection" class="section hidden">
         <div class="panel settings-panel">
           <h2>Настройки</h2>
-          <label>Имя<input id="settingsName"></label>
-          <label>Username<input id="settingsUsername" placeholder="например vadim" maxlength="24"><span class="small muted">По нему тебя смогут найти друзья.</span></label>
           <div class="settings-card appearance-card">
-            <div><strong>Внешний вид</strong><p class="small muted">Можно использовать тему устройства или выбрать светлую/тёмную.</p></div>
+            <div><strong>Внешний вид</strong><p class="small muted">Выбери светлую, тёмную или системную тему.</p></div>
             <label>Тема<select id="themeSelect"><option value="system">Как на устройстве</option><option value="light">Светлая</option><option value="dark">Тёмная</option></select></label>
           </div>
           <div class="settings-card">
-            <div><strong>Уведомления</strong><p class="small muted">Push-уведомления приходят даже когда week. закрыт. На iPhone приложение должно быть добавлено на экран «Домой».</p><p id="notificationStatus" class="small muted">Проверка…</p></div>
+            <div><strong>Уведомления</strong><p class="small muted">На iPhone push-уведомления работают, когда week. добавлен на экран «Домой».</p><p id="notificationStatus" class="small muted">Проверка…</p></div>
             <label class="switch"><input id="notificationsEnabled" type="checkbox"><span></span> Включить</label>
             <label>Напоминать за<select id="notificationLead"><option value="5">5 минут</option><option value="10">10 минут</option><option value="15" selected>15 минут</option><option value="30">30 минут</option></select></label>
             <button id="enableNotifications" class="secondary">Разрешить уведомления</button>
           </div>
-          <label>Стандартная длительность (мин)<input id="defaultDuration" type="number" min="5" step="5" value="60"></label>
-          <button id="saveSettings" class="primary">Сохранить</button><button id="editScheduleBtn" class="secondary">Изменить расписание</button>
+          <label>Стандартная длительность задачи (мин)<input id="defaultDuration" type="number" min="5" max="1440" step="5" value="60"></label>
+          <button id="saveSettings" class="primary">Сохранить настройки</button>
           <hr>
-          <h3>Данные</h3>
+          <h3>Резервная копия</h3>
           <div class="settings-actions">
             <button id="exportBtn" class="secondary">Экспорт JSON</button>
             <label class="file-btn secondary">Импорт JSON<input id="importFile" type="file" accept=".json" hidden></label>
           </div>
-          <p class="small muted">Экспорт — дополнительная резервная копия. Основные данные хранятся в Supabase.</p>
+          <p class="small muted">Экспорт сохраняет резервную копию твоих данных. Основные данные хранятся в Supabase.</p>
         </div>
       </section>
     </main>

@@ -448,6 +448,8 @@
     $("authForm").onsubmit=authSubmit;
     $("demoBtn").onclick=()=>{state.demo=true;state.user=demoData.profiles[0];state.profile=state.user;loadDemo();showApp();toast("Открыт демо-режим")};
     $("logoutBtn").onclick=logout;
+    $("profileBtn").onclick=()=>switchSection("profile");
+    $("settingsBtn").onclick=()=>switchSection("settings");
     qsa(".nav-btn").forEach(b=>b.onclick=()=>switchSection(b.dataset.section));
     $("friendSearchForm").onsubmit=searchFriend;
     $("onboardingForm").onsubmit=finishOnboarding;
@@ -497,6 +499,7 @@
     $("taskForm").onsubmit=saveTask;
     $("templateForm").onsubmit=saveTemplate;
     $("saveSettings").onclick=saveSettings;
+    $("saveProfileBtn").onclick=saveProfile;
     if($("themeSelect")){$("themeSelect").value=localStorage.getItem("week-theme")||APP_CFG.theme||"system";$("themeSelect").onchange=e=>applyTheme(e.target.value)}
     $("exportBtn").onclick=exportData;
     $("importFile").onchange=importData;
@@ -521,12 +524,36 @@
   }
   async function logout(){if(!state.demo)await sb.auth.signOut();else{state.user=null;showAuth()}}
 
+  const sectionHeaders={
+    requests:["Предложения","Новые задачи от друзей и ответы на твои предложения"],
+    friends:["Друзья","Люди, с которыми удобно строить общие планы"],
+    templates:["Частые задачи","Твои шаблоны для быстрого планирования"],
+    stats:["Статистика","Посмотри, как проходит твоя неделя"],
+    profile:["Мой профиль","Личные данные и твоё расписание"],
+    settings:["Настройки","Оформление, уведомления и резервные копии"]
+  };
+  function updateSectionHeader(){
+    const header=sectionHeaders[state.section];
+    if(!header)return;
+    $("sectionTitle").textContent=header[0];
+    $("weekLabel").textContent=header[1];
+  }
   function switchSection(s){
     state.section=s;
     qsa(".nav-btn").forEach(b=>b.classList.toggle("active",b.dataset.section===s));
-    ["week","requests","friends","templates","stats","settings"].forEach(x=>$(`${x}Section`).classList.toggle("hidden",x!==s));
-    if(s==="week")renderWeek();else $("sectionTitle").textContent={requests:"Предложения",friends:"Друзья",templates:"Частые задачи",stats:"Статистика",settings:"Настройки"}[s];
-    if(s==="requests")renderRequests();if(s==="friends")renderFriends();if(s==="templates")renderTemplates();if(s==="stats")renderStats();if(s==="settings")renderSettings();
+    $("profileBtn").classList.toggle("active",s==="profile");
+    $("settingsBtn").classList.toggle("active",s==="settings");
+    $("profileBtn").setAttribute("aria-pressed",String(s==="profile"));
+    $("settingsBtn").setAttribute("aria-pressed",String(s==="settings"));
+    ["week","requests","friends","templates","stats","profile","settings"].forEach(x=>$(`${x}Section`).classList.toggle("hidden",x!==s));
+    if(s==="week")renderWeek();
+    if(s==="requests")renderRequests();
+    if(s==="friends")renderFriends();
+    if(s==="templates")renderTemplates();
+    if(s==="stats")renderStats();
+    if(s==="profile")renderProfile();
+    if(s==="settings")renderSettings();
+    updateSectionHeader();
   }
 
 
@@ -535,7 +562,7 @@
   window.dismissOnboarding=()=>{
     localStorage.setItem("week-onboarding-dismissed","1");
     $("onboardingModal").classList.add("hidden");
-    toast("Хорошо, можно заполнить это позже в Настройках → «Изменить расписание»");
+    toast("Расписание можно заполнить позже в профиле");
   };
   function openOnboarding(){
     state.onboardingStep=1;
@@ -631,7 +658,7 @@
     $("profileName").textContent=state.profile?.display_name||"Пользователь";
     $("profileEmail").textContent=state.profile?.email||state.user?.email||"";
     $("avatar").textContent=(state.profile?.display_name||"П").slice(0,1).toUpperCase();
-    renderWeek();renderRequests();renderFriends();renderTemplates();renderStats();renderSettings();updateTimerBar();
+    renderWeek();renderRequests();renderFriends();renderTemplates();renderStats();renderProfile();renderSettings();updateTimerBar();updateSectionHeader();
   }
 
   function visibleTasks(){
@@ -666,8 +693,10 @@
     if(state.calendarView==="week"){renderWeekOverview();return}
     const ds=iso(selectedDate());
     syncWeekStart();
-    $("weekLabel").textContent=isToday(ds)?"Сегодня":"";
-    $("sectionTitle").textContent=dayTitle(ds);
+    if(state.section==="week"){
+      $("weekLabel").textContent=isToday(ds)?"Сегодня":"";
+      $("sectionTitle").textContent=dayTitle(ds);
+    }
     const base=visibleTasks();
     const tasks=expandOccurrences(base,selectedDate(),1).filter(t=>t.date===ds);
     const timed=tasks.filter(t=>t.start_time);
@@ -717,8 +746,10 @@
     syncWeekStart();
     const dates=Array.from({length:7},(_,i)=>{const d=new Date(state.weekStart);d.setDate(d.getDate()+i);return d});
     const last=dates[6];
-    $("sectionTitle").textContent=`${fmtDate(iso(dates[0]))} — ${fmtDate(iso(last))}`;
-    $("weekLabel").textContent="Неделя · нажми на день, чтобы открыть подробное расписание";
+    if(state.section==="week"){
+      $("sectionTitle").textContent=`${fmtDate(iso(dates[0]))} — ${fmtDate(iso(last))}`;
+      $("weekLabel").textContent="Неделя · нажми на день, чтобы открыть подробное расписание";
+    }
     const occurrences=expandOccurrences(visibleTasks(),state.weekStart,7);
     $("weekGrid").innerHTML=dates.map((date,i)=>{
       const ds=iso(date),tasks=occurrences.filter(t=>t.date===ds);
@@ -1109,23 +1140,39 @@
     $("categoryStats").innerHTML=Object.entries(cats).sort((a,b)=>b[1]-a[1]).map(([c,v])=>`<div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line)"><span>${esc(c)}</span><strong>${Math.floor(v/60)}ч ${v%60}м</strong></div>`).join("")||"<p class='muted'>Нет задач.</p>";
   }
 
-  function renderSettings(){
+  function renderProfile(){
     $("settingsName").value=state.profile?.display_name||"";
     $("settingsUsername").value=state.profile?.username||"";
+  }
+  function renderSettings(){
     $("defaultDuration").value=localStorage.getItem("week-default-duration")||60;
     if($("themeSelect"))$("themeSelect").value=localStorage.getItem("week-theme")||APP_CFG.theme||"system";
     const ns=notificationSettings();
     if($("notificationsEnabled")){ $("notificationsEnabled").checked=ns.enabled; $("notificationLead").value=String(ns.lead); }
   }
-  async function saveSettings(){
+  async function saveProfile(){
     const name=$("settingsName").value.trim()||"Пользователь";
     const username=normalizeUsername($("settingsUsername").value);
     if(!username){toast("Укажи username");return}
-    localStorage.setItem("week-default-duration", String(Number($("defaultDuration").value)||60));
+    if(state.demo){
+      state.profile.display_name=name;state.profile.username=username;
+      const profile=demoData.profiles.find(x=>x.id===currentUserId());
+      if(profile){profile.display_name=name;profile.username=username}
+      saveDemo();
+    }else{
+      const {error}=await sb.from("profiles").update({display_name:name,username}).eq("id",state.user.id);
+      if(error){toast(error.message);return}
+      state.profile.display_name=name;state.profile.username=username;
+    }
+    renderAll();toast("Профиль сохранён");
+  }
+  async function saveSettings(){
+    const duration=Number($("defaultDuration").value);
+    if(!Number.isFinite(duration)||duration<5||duration>1440){toast("Укажи длительность от 5 до 1440 минут");return}
+    localStorage.setItem("week-default-duration",String(duration));
     saveNotificationSettings();
     await syncPushSubscription();
-    if(state.demo){state.profile.display_name=name;state.profile.username=username;demoData.profiles[0].display_name=name;demoData.profiles[0].username=username;saveDemo()}else{const {error}=await sb.from("profiles").update({display_name:name,username}).eq("id",state.user.id);if(error){toast(error.message);return}state.profile.display_name=name;state.profile.username=username}
-    renderAll();toast("Настройки сохранены");
+    toast("Настройки сохранены");
   }
   function exportData(){
     const data={exported_at:new Date().toISOString(),profile:state.profile,schedule:state.schedule,tasks:state.tasks,requests:state.requests,templates:state.templates};
