@@ -632,6 +632,7 @@
     $("adminClassSelect").onchange=async e=>{state.adminClassId=e.target.value||null;$("classCodeBox").classList.add("hidden");await reloadCloud();renderAll()};
     $("classRotateCode").onclick=rotateClassCode;
     $("classCopyCode").onclick=async()=>{if(!state.lastClassCode)return;try{await navigator.clipboard.writeText(state.lastClassCode);toast("Код скопирован")}catch{toast("Выдели код и скопируй вручную")}};
+    $("classImportMySchedule").onclick=importMySchoolScheduleToClass;
     $("classEditSchedule").onclick=openClassScheduleEditor;
     $("classAddLesson").onclick=()=>addClassLessonRow();
     $("classCancelSchedule").onclick=()=>$("classScheduleEditor").classList.add("hidden");
@@ -765,6 +766,8 @@
     qsa('input[name="school"]').forEach(x=>x.checked=x.value===(state.classGroup?"yes":school));
     qsa('input[name="extras"]').forEach(x=>x.checked=x.value===(hasExtra?"yes":state.profile?.onboarding_completed?"no":""));
     $("schoolScheduleList").innerHTML=""; $("extraScheduleList").innerHTML="";
+    delete $("schoolScheduleList").dataset.lastSelectedDay;
+    delete $("extraScheduleList").dataset.lastSelectedDay;
     (state.classGroup?[]:state.personalSchedule||[]).filter(x=>x.kind==="school").forEach(x=>addScheduleEditorRow("school",x));
     (state.personalSchedule||[]).filter(x=>x.kind==="extra").forEach(x=>addScheduleEditorRow("extra",x));
     updateScheduleEmpty("school");updateScheduleEmpty("extra");
@@ -785,12 +788,16 @@
   function addScheduleEditorRow(type,item={}){
     const list=$(type==="school"?"schoolScheduleList":"extraScheduleList");
     const row=document.createElement("div");row.className="schedule-row";
-    const day=String(item.day_of_week??"1");
+    // A newly added lesson inherits the last day selected in this editor.
+    // Existing lessons keep their saved weekdays when the editor opens.
+    const day=String(item.day_of_week ?? list.dataset.lastSelectedDay ??
+      list.querySelector('.schedule-row:last-child [data-field="day"]')?.value ?? "1");
     row.innerHTML=`<label>День<select data-field="day">${DAY_OPTIONS.map(([v,n])=>`<option value="${v}" ${v===day?"selected":""}>${n}</option>`).join("")}</select></label>
       <label>${type==="school"?"Предмет":"Занятие"}<input data-field="title" required value="${esc(item.title||"")}" placeholder="${type==="school"?"Например, математика":"Например, репетитор"}"></label>
       <label>Начало<input data-field="start" type="time" required value="${esc((item.start_time||"").slice(0,5))}"></label>
       <label>Конец<input data-field="end" type="time" required value="${esc((item.end_time||"").slice(0,5))}"></label>
       <button type="button" class="schedule-remove">×</button>`;
+    row.querySelector('[data-field="day"]').onchange=e=>{list.dataset.lastSelectedDay=e.target.value;};
     row.querySelector(".schedule-remove").onclick=()=>{row.remove();updateScheduleEmpty(type)};
     list.appendChild(row);updateScheduleEmpty(type);
   }
@@ -1547,19 +1554,25 @@
     classCodeMessage(data);toast("Код обновлён");
   }
   function addClassLessonRow(item={}){
+    const list=$("classScheduleRows");
     const row=document.createElement("div");row.className="schedule-row";
-    const day=String(item.day_of_week??"1");
+    // A newly added lesson inherits the last day selected in this editor.
+    // Existing lessons keep their saved weekdays when the editor opens.
+    const day=String(item.day_of_week ?? list.dataset.lastSelectedDay ??
+      list.querySelector('.schedule-row:last-child [data-field="day"]')?.value ?? "1");
     row.innerHTML=`<label>День<select data-field="day">${DAY_OPTIONS.map(([v,n])=>`<option value="${v}" ${v===day?"selected":""}>${n}</option>`).join("")}</select></label>
       <label>Предмет<input data-field="title" maxlength="120" value="${esc(item.title||"")}" placeholder="Например, математика" required></label>
       <label>Начало<input type="time" data-field="start" value="${esc(String(item.start_time||"").slice(0,5))}" required></label>
       <label>Конец<input type="time" data-field="end" value="${esc(String(item.end_time||"").slice(0,5))}" required></label>
       <button type="button" class="schedule-remove" aria-label="Удалить урок">×</button>`;
+    row.querySelector('[data-field="day"]').onchange=e=>{list.dataset.lastSelectedDay=e.target.value;};
     row.querySelector(".schedule-remove").onclick=()=>row.remove();
-    $("classScheduleRows").appendChild(row);
+    list.appendChild(row);
   }
   function openClassScheduleEditor(){
     if(!state.isWeekAdmin||!state.classViewGroup)return;
     $("classScheduleRows").innerHTML="";
+    delete $("classScheduleRows").dataset.lastSelectedDay;
     (state.classViewSchedule||[]).forEach(addClassLessonRow);
     $("classScheduleEditor").classList.remove("hidden");
   }
@@ -1582,6 +1595,67 @@
     if(error){toast(error.message);return}
     await reloadCloud();$("classScheduleEditor").classList.add("hidden");renderAll();toast("Расписание сохранено для всего класса");
   }
+  // Copy only the administrator's personal SCHOOL lessons into the selected class.
+  // Never copy private extra lessons, delete the source, or accept an empty import.
+  function schoolLessonsForClassImport(schedule){
+    return (schedule||[]).filter(item=>item.kind==="school").map(item=>({
+      day_of_week:Number(item.day_of_week),
+      title:String(item.title||"").trim(),
+      start_time:String(item.start_time||"").slice(0,5),
+      end_time:String(item.end_time||"").slice(0,5)
+    }));
+  }
+  async function importMySchoolScheduleToClass(){
+    if(!state.isWeekAdmin||!state.classViewGroup)return toast("Нет прав администратора или класс не выбран");
+    const button=$("classImportMySchedule");
+    if(button.disabled)return;
+    const classId=state.classViewGroup.id, className=state.classViewGroup.name;
+    button.disabled=true;
+    try{
+      let source=state.personalSchedule||[];
+      if(!state.demo){
+        // Read the stored personal schedule afresh: the visible calendar hides
+        // private school lessons after a user joins a class.
+        const {data,error}=await sb.from("schedule_items")
+          .select("kind,day_of_week,title,start_time,end_time")
+          .eq("user_id",state.user.id).eq("kind","school")
+          .order("day_of_week").order("start_time");
+        if(error)throw error;
+        source=data||[];
+      }
+      if(!state.isWeekAdmin||state.classViewGroup?.id!==classId)
+        return toast("Выбранный класс изменился. Повтори перенос");
+      const items=schoolLessonsForClassImport(source);
+      if(!items.length)return toast("В твоём личном расписании нет школьных уроков");
+      if(items.length>70||items.some(x=>!Number.isInteger(x.day_of_week)||x.day_of_week<0||x.day_of_week>6||
+        !x.title||x.title.length>120||!x.start_time||!x.end_time||x.end_time<=x.start_time))
+        return toast("Проверь личные уроки: названия, время и лимит 70 записей");
+      const existing=(state.classViewSchedule||[]).length;
+      const message=`Перенести ${items.length} школьных уроков из твоего личного расписания в класс «${className}»?\n\n`+
+        (existing?`Текущее расписание класса (${existing} уроков) будет ПОЛНОСТЬЮ ЗАМЕНЕНО.\n`:
+          "Для этого класса будет создано общее расписание.\n")+
+        "Личное расписание останется без изменений. Дополнительные занятия не переносим.";
+      if(!confirm(message))return;
+      if(!state.isWeekAdmin||state.classViewGroup?.id!==classId)
+        return toast("Выбранный класс изменился. Повтори перенос");
+      if(state.demo){
+        demoData.classSchedules=(demoData.classSchedules||[]).filter(x=>x.class_id!==classId);
+        demoData.classSchedules.push(...items.map(x=>({...x,class_id:classId,id:uid()})));
+        saveDemo();loadDemo();
+      }else{
+        // Existing SQL RPC checks week_admins and changes the class atomically.
+        const {error}=await sb.rpc("week_replace_class_schedule",{p_class_id:classId,p_items:items});
+        if(error)throw error;
+        await reloadCloud();
+      }
+      $("classScheduleEditor").classList.add("hidden");
+      renderAll();
+      toast(`Перенесено ${items.length} уроков в класс «${className}»`);
+    }catch(error){
+      console.error("Импорт личного расписания в класс",error);
+      toast(`Не удалось перенести расписание: ${error.message||"ошибка соединения"}`);
+    }finally{button.disabled=false;}
+  }
   function renderClasses(){
     const admin=state.isWeekAdmin, mine=state.classGroup, group=state.classViewGroup;
     $("classAdminPanel").classList.toggle("hidden",!admin);
@@ -1603,6 +1677,7 @@
       const label=DAY_OPTIONS.find(x=>Number(x[0])===day)?.[1]||"";
       return `<div class="class-day"><strong>${label}</strong><div>${own.map(i=>`<div class="class-lesson"><span>${esc(String(i.start_time).slice(0,5))}–${esc(String(i.end_time).slice(0,5))}</span><b>${esc(i.title)}</b></div>`).join("")}</div></div>`;
     }).join(""):'<p class="small muted">Расписание ещё не заполнено.</p>';
+    $("classImportMySchedule").classList.toggle("hidden",!admin);
     $("classEditSchedule").classList.toggle("hidden",!admin);
     const rows=state.classMembers||[];
     $("classMembersList").innerHTML=rows.length?rows.map(f=>{

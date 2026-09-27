@@ -545,6 +545,9 @@ html[data-theme="dark"] .gap-add-button{background:#292e36;color:#d6cee5;border-
 .class-code-box code{font-size:16px;color:var(--text);letter-spacing:.055em;overflow-wrap:anywhere;font-weight:750}
 .class-heading{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:12px 0}
 .class-heading h3{margin:0}
+.class-heading-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.class-heading-actions button:disabled{opacity:.55;cursor:wait}
+@media(max-width:700px){.class-heading{align-items:flex-start;flex-wrap:wrap}.class-heading-actions{width:100%;justify-content:flex-start}.class-heading-actions button{flex:1 1 auto;min-height:44px}}
 .class-day{display:grid;grid-template-columns:48px 1fr;gap:12px;margin:15px 0;align-items:start}
 .class-day>strong{padding-top:12px;color:var(--muted);font-size:13px}
 .class-day>div{display:grid;gap:7px}
