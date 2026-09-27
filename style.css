@@ -410,3 +410,24 @@ html[data-theme="dark"] .task-actions .task-action-btn:hover,html[data-theme="da
   .task-actions .task-action-btn,.task-chip .task-actions .task-action-btn{width:44px;height:44px;min-height:44px}
 }
 @media(max-width:350px){.agenda-row{grid-template-columns:60px minmax(0,1fr);gap:5px}.agenda-time{font-size:11px}.agenda-row .task,.task-chip{padding:7px;gap:4px}.task-heading .task-title{font-size:12px}}
+
+
+/* week. 1.8: retain visible free time between chronological agenda entries */
+.agenda-track{gap:0}
+.agenda-track>.agenda-caption{padding:3px 4px 12px}
+.agenda-row.agenda-free-row{align-items:stretch;gap:12px}
+.agenda-row.agenda-free-row .agenda-time{justify-content:center;padding-top:0;opacity:.72}
+.agenda-row.agenda-free-row .agenda-time time:first-of-type{font-weight:600}
+.agenda-free-space{display:flex;align-items:center;justify-content:flex-start;border-left:2px solid var(--line);background:linear-gradient(90deg,var(--surface2),transparent 85%);margin-left:10px;padding:8px 10px 8px 17px;min-width:0}
+.agenda-free-label{display:inline-flex;flex-wrap:wrap;align-items:center;gap:5px;font-size:12px;line-height:1.4;color:var(--muted);font-weight:650}
+.agenda-free-indicator{height:7px;width:7px;background:#9a86d9;border-radius:100%;margin-right:3px;opacity:.75}
+.agenda-free-duration{font-variant-numeric:tabular-nums;font-weight:500;white-space:nowrap}
+.agenda-row:not(.agenda-free-row){padding:5px 0}
+html[data-theme="dark"] .agenda-free-space{background:linear-gradient(90deg,rgba(255,255,255,.025),transparent 85%);border-left-color:#47414f}
+html[data-theme="dark"] .agenda-free-indicator{background:#b7a4f6}
+@media(max-width:700px){
+ .agenda-row.agenda-free-row{gap:8px}
+ .agenda-free-space{margin-left:5px;padding:8px 7px 8px 12px}
+ .agenda-free-label{font-size:11px;gap:3px}
+}
+@media(max-width:350px){.agenda-row.agenda-free-row{gap:5px}.agenda-free-space{margin-left:3px;padding-left:9px}.agenda-free-label{font-size:10px}}

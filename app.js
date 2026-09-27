@@ -722,7 +722,35 @@
       ...timed.map(t=>({type:"task",start:toMin(t.start_time),end:toMin(t.start_time)+minutes(t),data:t})),
       ...daySchedule.filter(x=>x.start_time&&x.end_time).map(x=>({type:"schedule",start:toMin(x.start_time),end:toMin(x.end_time),data:x}))
     ].sort((a,b)=>a.start-b.start || a.end-b.end || (a.type==="schedule"?-1:1));
-    const agenda=events.map(e=>{
+    // Build a continuous day: occupied rows + explicit free intervals. A running
+    // cursor tracks the latest end, so overlapping tasks never create false gaps.
+    const agendaEntries=[];
+    const dayStart=Math.max(0,Math.min(1440,GRID_START_HOUR*60));
+    const dayEnd=Math.max(dayStart,Math.min(1440,GRID_END_HOUR*60));
+    let occupiedUntil=dayStart;
+    for(const event of events){
+      if(event.start>occupiedUntil && occupiedUntil<dayEnd){
+        agendaEntries.push({type:"free",start:occupiedUntil,end:Math.min(event.start,dayEnd)});
+      }
+      agendaEntries.push(event);
+      occupiedUntil=Math.max(occupiedUntil,event.end);
+    }
+    if(occupiedUntil<dayEnd){
+      agendaEntries.push({type:"free",start:occupiedUntil,end:dayEnd});
+    }
+    const agenda=agendaEntries.map(e=>{
+      if(e.type==="free"){
+        const duration=e.end-e.start;
+        const label=duration>=60?`${Math.floor(duration/60)} ч${duration%60?` ${duration%60} мин`:""}`:`${duration} мин`;
+        // Visual height reflects real duration, capped for long intervals.
+        // Tasks keep full-size action buttons regardless of their duration.
+        const height=Math.round(Math.max(46,Math.min(220,40+duration*.65)));
+        const finish=e.end===1440?"24:00":clockTime(e.end);
+        return `<div class="agenda-row agenda-free-row" aria-label="Свободно с ${clockTime(e.start)} до ${finish}">
+          <div class="agenda-time agenda-free-time"><time>${clockTime(e.start)}</time><span class="agenda-time-dash">–</span><time>${finish}</time></div>
+          <div class="agenda-free-space" style="min-height:${height}px"><div class="agenda-free-label"><span class="agenda-free-indicator" aria-hidden="true"></span>Свободно <span class="agenda-free-duration">· ${label}</span></div></div>
+        </div>`;
+      }
       const range=`<div class="agenda-time" aria-label="${esc(timeRange(e.start,e.end))}"><time>${clockTime(e.start)}</time><span class="agenda-time-dash">–</span><time>${clockTime(e.end)}</time>${e.end>=1440?'<span class="agenda-next-day">+1 день</span>':""}</div>`;
       if(e.type==="schedule"){
         const item=e.data;
@@ -735,7 +763,7 @@
       <div class="day-head"><div><span class="day-name">${dayTitle(ds)}</span><div class="small muted">${isToday(ds)?"Текущий день":""}</div></div><span class="day-date">${fmtDate(ds)}</span></div>
       <div class="day-summary"><div><strong>${tasks.length}</strong><span> ${tasks.length===1?"задача":"задач"}</span></div><div class="load-line"><span class="${level}" style="width:${Math.min(100,total/600*100)}%"></span></div><span class="small muted">${Math.floor(total/60)} ч ${total%60} мин</span></div>
       ${untimed.length?`<div class="untimed-list"><div class="agenda-caption">Без времени</div>${untimed.map(taskChipHtml).join("")}</div>`:""}
-      ${empty?`<div class="empty-day"><div class="empty-icon">○</div><strong>День свободен</strong><span>Здесь пока нет задач</span><button class="secondary" onclick="window.openTaskForDate('${ds}')">+ Добавить задачу</button></div>`:agenda?`<div class="day-track agenda-track"><div class="agenda-caption">По времени</div>${agenda}</div>`:""}
+      ${empty?`<div class="empty-day"><div class="empty-icon">○</div><strong>День свободен</strong><span>Здесь пока нет задач</span><button class="secondary" onclick="window.openTaskForDate('${ds}')">+ Добавить задачу</button></div>`:`<div class="day-track agenda-track"><div class="agenda-caption">Занятость и свободные промежутки</div>${agenda}</div>`}
     </div>`;
     $("prevWeek").classList.toggle("muted-nav",false);
   }
