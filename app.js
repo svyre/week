@@ -36,6 +36,43 @@
 
   const APP_CFG=window.APP_CONFIG||{};
   const GRID_START_HOUR=Number(APP_CFG.dayStartHour??0), GRID_END_HOUR=Number(APP_CFG.dayEndHour??24), PX_PER_HOUR=56;
+  const LOADING_MIN_MS=5000;
+  const splashStartedAt=Date.now();
+  const loadingMessages=[
+    "Начни с одного главного дела — и день уже пойдёт лучше.",
+    "Маленький шаг сегодня лучше, чем идеальный план завтра.",
+    "Не перегружай день: 3 важных задачи вполне достаточно.",
+    "Если дело занимает 2 минуты — сделай его сразу.",
+    "Оставь немного свободного времени: паузы тоже часть продуктивности.",
+    "Не жди мотивации — начни с первого маленького действия.",
+    "Сложную задачу проще победить, если разбить её на шаги.",
+    "Сначала важное, потом срочное — так спокойнее жить.",
+    "Даже 20 минут фокуса могут сильно продвинуть тебя вперёд.",
+    "Отмечай завершённые дела — это помогает видеть прогресс.",
+    "Один хороший день складывается из нескольких простых решений.",
+    "План нужен не для давления, а чтобы освободить голову.",
+    "Сегодня не обязательно успеть всё. Достаточно сделать главное.",
+    "Регулярность почти всегда сильнее редких рывков.",
+    "Не забывай про отдых: энергия — тоже ресурс."];
+
+  function resolveTheme(theme){
+    return theme==="system"?(window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"):theme;
+  }
+  function randomLoadingMessage(){
+    return loadingMessages[Math.floor(Math.random()*loadingMessages.length)]||loadingMessages[0];
+  }
+  function updateLoadingScreen(theme=resolveTheme(localStorage.getItem("week-theme")||APP_CFG.theme||"system")){
+    const logo=$("loadingLogo"), message=$("loadingMessage");
+    if(logo)logo.src=theme==="dark"?"weekdark.png":"week.png";
+    if(message && !message.dataset.filled){message.textContent=randomLoadingMessage();message.dataset.filled="1";}
+  }
+  function finishLoadingScreen(){
+    const screen=$("loadingScreen");
+    if(!screen||screen.dataset.done)return;
+    screen.dataset.done="1";
+    const delay=Math.max(0,LOADING_MIN_MS-(Date.now()-splashStartedAt));
+    setTimeout(()=>screen.classList.add("hide"),delay);
+  }
 
   // Раскладывает задачи одного дня по колонкам-дорожкам (lanes), если время пересекается.
   function layoutDayTasks(dayTasks){
@@ -299,6 +336,7 @@
   }
 
   async function boot(){
+    updateLoadingScreen();
     bindStatic();
     if(state.demo){
       state.user=demoData.profiles[0]; state.profile=state.user;
@@ -330,8 +368,8 @@
     scheduleNotifications();
   }
   function saveDemo(){localStorage.setItem("week-demo",JSON.stringify(demoData))}
-  function showAuth(){$("authView").classList.remove("hidden");$("appView").classList.add("hidden")}
-  function showApp(){$("authView").classList.add("hidden");$("appView").classList.remove("hidden");renderAll();updateNotificationStatus()}
+  function showAuth(){$("authView").classList.remove("hidden");$("appView").classList.add("hidden");finishLoadingScreen()}
+  function showApp(){$("authView").classList.add("hidden");$("appView").classList.remove("hidden");renderAll();updateNotificationStatus();finishLoadingScreen()}
 
   async function updateNotificationStatus(){
     const el=$("notificationStatus");if(!el)return;
@@ -709,9 +747,10 @@
 
   function applyTheme(theme){
     localStorage.setItem("week-theme",theme);
-    const resolved=theme==="system"?(window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"):theme;
+    const resolved=resolveTheme(theme);
     document.documentElement.dataset.theme=resolved;
     const meta=$("themeColor");if(meta)meta.setAttribute("content",resolved==="dark"?"#101114":"#f4f3ef");
+    updateLoadingScreen(resolved);
   }
 
   function timerButtonHtml(actionId){

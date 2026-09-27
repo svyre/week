@@ -8,13 +8,26 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="manifest" href="manifest.webmanifest">
-  <link rel="apple-touch-icon" href="week.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="week-32.png">
+  <link rel="icon" type="image/x-icon" href="favicon.ico">
+  <link rel="apple-touch-icon" sizes="180x180" href="week-180.png">
   <title>week. — планировщик</title>
   <link rel="stylesheet" href="style.css">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
   <div id="toast" class="toast"></div>
+  <div id="loadingScreen" class="loading-screen" aria-live="polite">
+    <div class="loading-card">
+      <img id="loadingLogo" class="loading-logo" src="week.png" alt="week.">
+      <div class="loading-copy">
+        <div class="loading-title">week<span>.</span></div>
+        <p class="loading-subtitle">Собираем твой день…</p>
+        <p id="loadingMessage" class="loading-message">Пусть сегодня всё идёт по плану.</p>
+      </div>
+      <div class="loading-dots" aria-hidden="true"><span></span><span></span><span></span></div>
+    </div>
+  </div>
   <div id="authView" class="auth-screen">
     <div class="auth-card">
       <div class="logo">week<span>.</span></div>
