@@ -3,6 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'none'; object-src 'none'; frame-src 'none'; media-src 'none'; form-action 'self'; img-src 'self' data: blob:; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' https://cdn.jsdelivr.net; script-src-attr 'none'; connect-src 'self' https://slxnlvvdwluhszwvwgmo.supabase.co wss://slxnlvvdwluhszwvwgmo.supabase.co; worker-src 'self' blob:; manifest-src 'self'; upgrade-insecure-requests">
   <meta name="theme-color" content="#f4f3ef" id="themeColor">
   <meta name="apple-mobile-web-app-title" content="week.">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -12,17 +14,7 @@
   <link rel="icon" type="image/x-icon" href="favicon.ico">
   <link rel="apple-touch-icon" sizes="180x180" href="week-180.png">
   <title>week. — планировщик</title>
-  <script>
-    // Применяем тему до первого кадра: светлый логотип не мелькнёт на тёмном фоне.
-    (function () {
-      var preference = 'system';
-      try { preference = localStorage.getItem('week-theme') || 'system'; } catch (_) {}
-      var dark = preference === 'dark' || (preference !== 'light' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
-      document.documentElement.dataset.theme = dark ? 'dark' : 'light';
-      window.__weekSplashStart = Date.now();
-      if (dark) document.querySelector('#themeColor').setAttribute('content', '#121522');
-    })();
-  </script>
+  <script src="bootstrap.js"></script>
   <style>
     /* Минимальные стили до загрузки основного CSS: никакой белой вспышки в тёмной теме. */
     html[data-theme="dark"],html[data-theme="dark"] body,html[data-theme="dark"] .loading-screen{background:#121522}
@@ -30,7 +22,7 @@
     html:not([data-theme="dark"]) .loading-logo-dark{display:none}
   </style>
   <link rel="stylesheet" href="style.css">
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2" referrerpolicy="no-referrer"></script>
 </head>
 <body>
   <div id="toast" class="toast"></div>
@@ -58,10 +50,10 @@
         <button class="tab" data-auth="signup">Регистрация</button>
       </div>
       <form id="authForm">
-        <label>Email<input id="email" type="email" required placeholder="you@example.com"></label>
-        <label>Пароль<input id="password" type="password" minlength="6" required placeholder="••••••••"></label>
-        <label id="nameField" class="hidden">Имя<input id="displayName" placeholder="Например, Вадим"></label>
-        <label id="signupClassField" class="hidden">Код класса (необязательно)<input id="signupClassCode" autocomplete="off" maxlength="32" placeholder="Код от администратора"><span class="small muted">Если укажешь код, попадёшь в класс сразу после регистрации.</span></label>
+        <label>Email<input id="email" type="email" required maxlength="254" autocomplete="email" inputmode="email" autocapitalize="none" spellcheck="false" placeholder="you@example.com"></label>
+        <label>Пароль<input id="password" type="password" minlength="10" maxlength="128" required autocomplete="current-password" placeholder="••••••••••"></label>
+        <label id="nameField" class="hidden">Имя<input id="displayName" maxlength="80" autocomplete="name" placeholder="Например, Вадим"></label>
+        <label id="signupClassField" class="hidden">Код класса (необязательно)<input id="signupClassCode" autocomplete="off" maxlength="32" inputmode="text" autocapitalize="characters" spellcheck="false" placeholder="Код от администратора"><span class="small muted">Если укажешь код, попадёшь в класс сразу после регистрации.</span></label>
         <button class="primary full" type="submit" id="authSubmit">Войти</button>
       </form>
       <p id="authHint" class="small muted">После регистрации проверь почту, если включено подтверждение email.</p>
@@ -428,7 +420,6 @@
   </div>
 
   <script src="config.js"></script>
-  <script>if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{}));}</script>
   <script src="app.js"></script>
 </body>
 </html>

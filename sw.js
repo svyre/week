@@ -1,25 +1,94 @@
-const CACHE="week-v231-requests";
-const ASSETS=["./","./index.html","./style.css","./app.js","./config.js","./manifest.webmanifest","./week.png","./weekdark.png","./favicon.ico","./week-32.png","./week-180.png","./week-192.png","./week-512.png"];
-self.addEventListener("install",e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS)).then(()=>self.skipWaiting())));
-self.addEventListener("activate",e=>e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim())));
-// Network-first: всегда пытаемся получить свежий файл с сервера и только при
-// отсутствии сети откатываемся на то, что было закэшировано раньше.
-self.addEventListener("fetch",e=>{
-  // Only static assets from this site's origin. Do not cache authenticated API responses.
-  if(e.request.method!=="GET" || new URL(e.request.url).origin!==self.location.origin)return;
-  const allowed=["document","script","style","image","font","manifest"].includes(e.request.destination);
-  if(!allowed)return;
-  e.respondWith(fetch(e.request).then(res=>{
-    if(res.ok && res.status===200){
-      const copy=res.clone();
-      e.waitUntil(caches.open(CACHE).then(c=>c.put(e.request,copy)).catch(()=>{}));
+const CACHE = "week-v232-security";
+const ASSETS = [
+  "./", "./index.html", "./style.css", "./bootstrap.js", "./app.js", "./config.js",
+  "./manifest.webmanifest", "./week.png", "./weekdark.png", "./favicon.ico",
+  "./week-32.png", "./week-180.png", "./week-192.png", "./week-512.png"
+];
+const STATIC_PATHS = new Set(ASSETS.map(path => new URL(path, self.location.href).pathname));
+
+self.addEventListener("install", event => {
+  event.waitUntil(
+    caches.open(CACHE)
+      .then(cache => cache.addAll(ASSETS))
+      .then(() => self.skipWaiting())
+  );
+});
+
+self.addEventListener("activate", event => {
+  event.waitUntil(
+    caches.keys()
+      .then(keys => Promise.all(keys.filter(key => key !== CACHE).map(key => caches.delete(key))))
+      .then(() => self.clients.claim())
+  );
+});
+
+async function networkFirst(request, fallbackPath) {
+  try {
+    const response = await fetch(request, { cache: "no-cache" });
+    if (response.ok && response.status === 200 && response.type === "basic") {
+      const copy = response.clone();
+      caches.open(CACHE).then(cache => cache.put(request, copy)).catch(() => {});
     }
-    return res;
-  }).catch(()=>caches.match(e.request).then(c=>c||Response.error())));
+    return response;
+  } catch (_) {
+    return (await caches.match(request)) || (fallbackPath ? await caches.match(fallbackPath) : null) || Response.error();
+  }
+}
+
+self.addEventListener("fetch", event => {
+  const request = event.request;
+  if (request.method !== "GET") return;
+  const url = new URL(request.url);
+  if (url.origin !== self.location.origin) return;
+
+  // Навигация может откатиться только к нашему index.html.
+  if (request.mode === "navigate") {
+    event.respondWith(networkFirst(request, "./index.html"));
+    return;
+  }
+
+  // Не кэшируем произвольные same-origin URL, API-ответы и пользовательские данные.
+  if (!STATIC_PATHS.has(url.pathname)) return;
+  event.respondWith(networkFirst(request));
 });
-self.addEventListener("push",e=>{
-  let data={title:"week.",body:"Новое напоминание",tag:"week-reminder",url:"./"};
-  try{if(e.data)data={...data,...e.data.json()}}catch{try{if(e.data)data.body=e.data.text()}catch{}}
-  e.waitUntil(self.registration.showNotification(data.title,{body:data.body,tag:data.tag,data:{url:data.url},icon:"./week.png",badge:"./week.png"}));
+
+self.addEventListener("push", event => {
+  let data = { title: "week.", body: "Новое напоминание", tag: "week-reminder", url: "./" };
+  try {
+    if (event.data) data = { ...data, ...event.data.json() };
+  } catch (_) {
+    try { if (event.data) data.body = event.data.text(); } catch (_) {}
+  }
+  event.waitUntil(self.registration.showNotification(String(data.title || "week.").slice(0, 120), {
+    body: String(data.body || "Новое напоминание").slice(0, 500),
+    tag: String(data.tag || "week-reminder").slice(0, 160),
+    data: { url: data.url },
+    icon: "./week.png",
+    badge: "./week.png"
+  }));
 });
-self.addEventListener("notificationclick",e=>{e.notification.close();const url=e.notification.data?.url||"./";e.waitUntil(clients.matchAll({type:"window",includeUncontrolled:true}).then(cs=>{for(const c of cs){if("focus"in c){c.navigate?.(url);return c.focus()}}return clients.openWindow?clients.openWindow(url):null;}));});
+
+function safeNotificationUrl(value) {
+  try {
+    const url = new URL(typeof value === "string" ? value : "./", self.location.origin);
+    return url.origin === self.location.origin ? url.href : new URL("./", self.location.origin).href;
+  } catch (_) {
+    return new URL("./", self.location.origin).href;
+  }
+}
+
+self.addEventListener("notificationclick", event => {
+  event.notification.close();
+  const url = safeNotificationUrl(event.notification.data?.url);
+  event.waitUntil(
+    clients.matchAll({ type: "window", includeUncontrolled: true }).then(windows => {
+      for (const client of windows) {
+        if ("focus" in client) {
+          if ("navigate" in client) client.navigate(url).catch(() => {});
+          return client.focus();
+        }
+      }
+      return clients.openWindow ? clients.openWindow(url) : null;
+    })
+  );
+});

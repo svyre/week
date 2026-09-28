@@ -1,6 +1,9 @@
 (() => {
-  const hasSupabase = !!(window.SUPABASE_URL && window.SUPABASE_ANON_KEY);
-  const sb = hasSupabase ? window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY) : null;
+  const supabasePublicKey = window.SUPABASE_PUBLISHABLE_KEY || window.SUPABASE_ANON_KEY || "";
+  const hasSupabase = !!(window.SUPABASE_URL && supabasePublicKey);
+  const sb = hasSupabase ? window.supabase.createClient(window.SUPABASE_URL, supabasePublicKey, {
+    auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}
+  }) : null;
   const $ = id => document.getElementById(id);
   const qs = s => document.querySelector(s);
   const qsa = s => [...document.querySelectorAll(s)];
@@ -193,7 +196,7 @@
   function checklistFor(t){return Array.isArray(t?.checklist)?t.checklist.filter(x=>x&&typeof x.text==="string"):[]}
   function checklistSummary(t){
     const items=checklistFor(t);
-    return items.length?`<button class="checklist-link" type="button" onclick="window.openChecklist('${t.seriesId||t.id}')" title="Открыть чек-лист">☑ ${items.filter(x=>x.done).length}/${items.length}</button>`:"";
+    return items.length?`<button class="checklist-link" type="button" data-action="open-checklist" data-id="${esc(t.seriesId||t.id)}" title="Открыть чек-лист">☑ ${items.filter(x=>x.done).length}/${items.length}</button>`:"";
   }
   function ownOverdueTasks(){
     const today=iso(new Date());
@@ -524,7 +527,7 @@
       if(error){console.warn("Участники",error);return false;}
       const mids=(memberRows||[]).map(m=>m.user_id);
       if(mids.length){
-        const {data:profiles,error:pErr}=await sb.from("public_profiles").select("id,display_name,username").in("id",mids);
+        const {data:profiles,error:pErr}=await sb.rpc("week_get_visible_profiles",{p_ids:mids});
         if(pErr){console.warn("Участники",pErr);return false;}
         state.classMembers=(profiles||[]).map(p=>({...p,role:memberRows.find(m=>m.user_id===p.id)?.role||"student"}))
           .sort((a,b)=>a.display_name.localeCompare(b.display_name,"ru"));
@@ -576,10 +579,11 @@
     const res=await sb.from("profiles").select("*").eq("id",user.id).maybeSingle();
     profile=res.data;
     if(!profile){
-      const name=(user.user_metadata?.display_name||user.email?.split("@")[0]||"Пользователь");
-      const ins=await sb.from("profiles").insert({id:user.id,display_name:name,email:user.email}).select().single();
+      const ins=await sb.rpc("week_ensure_profile");
+      if(ins.error){console.error("Profile recovery failed",ins.error);toast("Не удалось подготовить профиль. Попробуй войти ещё раз.");return}
       profile=ins.data;
     }
+    if(!profile){toast("Профиль аккаунта не найден. Обратись к администратору week.");return}
     state.profile=profile;
     await reloadCloud();
     showApp();
@@ -638,10 +642,10 @@
     const proposalProfileIds=[...(requests||[]).map(r=>r.from_user_id),...(sentRequests||[]).map(r=>r.to_user_id)];
     const profileIds=[...new Set([...friendIds,...requesterIds,...proposalProfileIds])];
     const {data:friendProfiles,error:profileErr}=profileIds.length?
-      await sb.from("public_profiles").select("id,display_name,username").in("id",profileIds):{data:[],error:null};
+      await sb.rpc("week_get_visible_profiles",{p_ids:profileIds}):{data:[],error:null};
     const allErr=windowErr||recurringErr||openErr||reqErr||sentReqErr||tplErr||logsErr||friendsErr||friendReqErr||sentFriendReqErr||scheduleErr||profileErr;
     if(completionErr)console.warn("Для серии выполнений нужна MIGRATION_2_0.sql",completionErr.message);
-    if(allErr){console.error("reloadCloud error",allErr);toast(`Ошибка загрузки: ${allErr.message}`);return}
+    if(allErr){console.error("reloadCloud error",allErr);toast("Не удалось загрузить данные. Обнови страницу или попробуй позже.");return}
     const uniqTasks=new Map();
     for(const t of [...(windowTasks||[]),...(olderRecurring||[]),...(olderOpen||[])])uniqTasks.set(t.id,t);
     state.tasks=[...uniqTasks.values()].sort((a,b)=>a.date.localeCompare(b.date)||String(a.start_time||"").localeCompare(String(b.start_time||"")));
@@ -723,7 +727,41 @@
     state.__notificationChannel=channel;
   }
 
+  function bindDynamicActions(){
+    document.addEventListener("click",e=>{
+      const el=e.target.closest?.("[data-action]");
+      if(!el)return;
+      const {action,id,date}=el.dataset;
+      const run=fn=>{try{const result=fn();if(result&&typeof result.catch==="function")result.catch(err=>{console.error(err);toast("Не удалось выполнить действие")});}catch(err){console.error(err);toast("Не удалось выполнить действие")}};
+      if(action==="open-checklist")return run(()=>window.openChecklist(id));
+      if(action==="open-task-date")return run(()=>window.openTaskForDate(date));
+      if(action==="select-calendar-day")return run(()=>window.selectCalendarDay(date));
+      if(action==="task-timer")return run(()=>window.toggleTimer(id));
+      if(action==="task-edit")return run(()=>window.weekEdit(id));
+      if(action==="task-delete")return run(()=>window.weekDelete(id));
+      if(action==="request-accept")return run(()=>window.acceptRequest(id));
+      if(action==="request-reject")return run(()=>window.rejectRequest(id));
+      if(action==="request-counter")return run(()=>window.counterRequest(id));
+      if(action==="friend-demo-add")return run(()=>window.demoAddFriend(id));
+      if(action==="friend-send")return run(()=>window.sendFriendRequest(id));
+      if(action==="friend-accept")return run(()=>window.acceptFriend(id));
+      if(action==="friend-reject")return run(()=>window.rejectFriend(id));
+      if(action==="friend-cancel")return run(()=>window.cancelFriendRequest(id));
+      if(action==="friend-unfriend")return run(()=>window.unfriend(id));
+      if(action==="class-lesson-edit")return run(()=>window.openClassLessonEdit(id));
+      if(action==="template-use")return run(()=>window.useTemplate(id));
+    });
+    document.addEventListener("change",e=>{
+      const el=e.target.closest?.("[data-change-action]");
+      if(!el)return;
+      const action=el.dataset.changeAction,id=el.dataset.id;
+      if(action==="task-toggle"){e.stopPropagation();void window.weekToggle(id,el.checked);}
+      if(action==="class-role")void window.setClassMemberRole(id,el.value);
+    });
+  }
+
   function bindStatic(){
+    bindDynamicActions();
     bindTimelineActions();
     qsa("[data-auth]").forEach(b=>b.onclick=()=>{state.authMode=b.dataset.auth;qsa("[data-auth]").forEach(x=>x.classList.toggle("active",x===b));$("nameField").classList.toggle("hidden",state.authMode!=="signup");$("signupClassField").classList.toggle("hidden",state.authMode!=="signup");$("authSubmit").textContent=state.authMode==="signup"?"Создать аккаунт":"Войти"});
     $("authForm").onsubmit=authSubmit;
@@ -828,8 +866,11 @@
 
   async function authSubmit(e){
     e.preventDefault();
-    const email=$("email").value.trim(),password=$("password").value,displayName=$("displayName").value.trim();
+    const email=$("email").value.trim().toLowerCase(),password=$("password").value,displayName=$("displayName").value.trim();
     if(state.authMode==="signup"){
+      if(password.length<10){toast("Пароль должен содержать не меньше 10 символов");return}
+      if(password.length>128){toast("Пароль слишком длинный");return}
+      if(displayName.length>80){toast("Имя должно быть не длиннее 80 символов");return}
       const classCode=$("signupClassCode").value.trim();
       if(classCode){
         const {data:className,error:codeError}=await sb.rpc("week_check_class_code",{p_code:classCode});
@@ -1115,7 +1156,7 @@
       <div class="day-head"><div><span class="day-name">${dayTitle(ds)}</span><div class="small muted">${isToday(ds)?"Текущий день":""}</div></div><span class="day-date">${fmtDate(ds)}</span></div>
       <div class="day-summary"><div><strong>${tasks.length}</strong><span> ${tasks.length===1?"задача":"задач"}</span></div><div class="load-line"><span class="${level}" style="width:${Math.min(100,total/600*100)}%"></span></div><span class="small muted">${Math.floor(total/60)} ч ${total%60} мин</span></div>
       ${untimed.length?`<div class="untimed-list"><div class="agenda-caption">Без времени</div>${untimed.map(taskChipHtml).join("")}</div>`:""}
-      ${empty?`<div class="empty-day"><div class="empty-icon">○</div><strong>Нет дел на этот день</strong><span>Здесь пока нет задач</span><button class="secondary" onclick="window.openTaskForDate('${ds}')">+ Добавить задачу</button></div>`:`<div class="day-track agenda-track"><div class="agenda-caption">Расписание по времени</div>${agenda || '<div class="agenda-untimed-only">Задачи без указания времени находятся выше</div>'}</div>`}
+      ${empty?`<div class="empty-day"><div class="empty-icon">○</div><strong>Нет дел на этот день</strong><span>Здесь пока нет задач</span><button class="secondary" data-action="open-task-date" data-date="${esc(ds)}">+ Добавить задачу</button></div>`:`<div class="day-track agenda-track"><div class="agenda-caption">Расписание по времени</div>${agenda || '<div class="agenda-untimed-only">Задачи без указания времени находятся выше</div>'}</div>`}
     </div>`;
     $("prevWeek").classList.toggle("muted-nav",false);
   }
@@ -1137,7 +1178,7 @@
       const total=tasks.reduce((a,t)=>a+minutes(t),0);
       const level=total>480?"high":total>300?"mid":"low";
       return `<div class="week-day ${isToday(ds)?"today-day":""}">
-        <button class="week-day-head" type="button" onclick="window.selectCalendarDay('${ds}')" aria-label="Открыть ${esc(dayTitle(ds))}">
+        <button class="week-day-head" type="button" data-action="select-calendar-day" data-date="${esc(ds)}" aria-label="Открыть ${esc(dayTitle(ds))}">
           <span>${dayName((date.getDay()+6)%7)} <strong>${date.getDate()}</strong></span><span class="small muted">${tasks.length} задач</span>
         </button>
         <div class="load-line"><span class="${level}" style="width:${Math.min(100,total/600*100)}%"></span></div>
@@ -1146,7 +1187,7 @@
           ${timed.map(t=>t._type==="schedule"?`<div class="week-schedule-item ${t.kind==="school"?"schedule-school":"schedule-extra"}"><span>${timeRange(toMin(t.start_time),toMin(t.end_time||t.start_time))}</span> ${esc(t.title)}${t._oneOff?'<span class="oneoff-badge"> · замена</span>':""}</div>`:`<div class="week-task-item">${taskChipHtml(t)}</div>`).join("")}
           ${!tasks.length&&!schedule.length?'<p class="small muted week-empty">Свободно</p>':""}
         </div>
-        <button type="button" class="secondary week-add" onclick="window.openTaskForDate('${ds}')">+ Задача</button>
+        <button type="button" class="secondary week-add" data-action="open-task-date" data-date="${esc(ds)}">+ Задача</button>
       </div>`;
     }).join("");
   }
@@ -1285,13 +1326,13 @@
   }
   function timerButtonHtml(actionId){
     const running=state.activeTimer && state.activeTimer.taskId===actionId;
-    return `<button type="button" class="task-action-btn task-timer-btn" onclick="window.toggleTimer('${actionId}')" aria-label="${running?"Остановить таймер":"Запустить таймер"}" title="${running?"Остановить таймер":"Запустить таймер"}">${running?"⏹":"⏱"}</button>`;
+    return `<button type="button" class="task-action-btn task-timer-btn" data-action="task-timer" data-id="${esc(actionId)}" aria-label="${running?"Остановить таймер":"Запустить таймер"}" title="${running?"Остановить таймер":"Запустить таймер"}">${running?"⏹":"⏱"}</button>`;
   }
   function taskActionsHtml(actionId){
     return `<div class="task-actions" role="group" aria-label="Действия с задачей">
       ${timerButtonHtml(actionId)}
-      <button type="button" class="task-action-btn" onclick="window.weekEdit('${actionId}')" aria-label="Изменить задачу" title="Изменить">✎</button>
-      <button type="button" class="task-action-btn task-delete-btn" onclick="window.weekDelete('${actionId}')" aria-label="Удалить задачу" title="Удалить">🗑</button>
+      <button type="button" class="task-action-btn" data-action="task-edit" data-id="${esc(actionId)}" aria-label="Изменить задачу" title="Изменить">✎</button>
+      <button type="button" class="task-action-btn task-delete-btn" data-action="task-delete" data-id="${esc(actionId)}" aria-label="Удалить задачу" title="Удалить">🗑</button>
     </div>`;
   }
   function taskChipHtml(t){
@@ -1300,7 +1341,7 @@
     const tracked=trackedMinutesFor(actionId);
     return `<article class="task-chip ${t.priority||"optional"} ${done?"done":""}"${taskColorAttr(t)}>
       <div class="task-content">
-        <div class="task-heading"><input class="check" aria-label="Отметить задачу" type="checkbox" ${done?"checked":""} onchange="window.weekToggle('${actionId}',this.checked)"><span class="task-title">${esc(t.title)}${t.recurrence?" 🔁":""}</span></div>
+        <div class="task-heading"><input class="check" aria-label="Отметить задачу" type="checkbox" ${done?"checked":""} data-change-action="task-toggle" data-id="${esc(actionId)}"><span class="task-title">${esc(t.title)}${t.recurrence?" 🔁":""}</span></div>
         <div class="task-meta">${t.start_time?timeRange(toMin(t.start_time),toMin(t.start_time)+minutes(t))+" • ":""}${minutes(t)} мин${tracked?` • ⏱${tracked}м`:""}${t.visibility==="shared"?" • Общая":""}</div>
         ${checklistSummary(t)}
       </div>
@@ -1313,7 +1354,7 @@
     const tracked=trackedMinutesFor(actionId);
     return `<article class="task ${t.priority||"optional"} ${done?"done":""}"${taskColorAttr(t)}>
       <div class="task-content">
-        <div class="task-heading"><input class="check" aria-label="Отметить задачу" type="checkbox" ${done?"checked":""} onchange="event.stopPropagation();window.weekToggle('${actionId}',this.checked)"><span class="task-title">${esc(t.title)}${t.recurrence?" 🔁":""}</span></div>
+        <div class="task-heading"><input class="check" aria-label="Отметить задачу" type="checkbox" ${done?"checked":""} data-change-action="task-toggle" data-id="${esc(actionId)}"><span class="task-title">${esc(t.title)}${t.recurrence?" 🔁":""}</span></div>
         <div class="task-meta"><span>${minutes(t)} мин</span>${t.fixed_time?"<span>• фикс.</span>":""}${tracked?`<span>• ⏱${tracked}м</span>`:""}${t.visibility==="shared"?"<span>• Общая</span>":""}</div>
         ${checklistSummary(t)}
       </div>
@@ -1384,7 +1425,7 @@
     list[Number(index)].done=done;
     if(state.demo){const original=demoData.tasks.find(x=>x.id===id);if(original)original.checklist=list;saveDemo();loadDemo()}
     else{
-      const {error}=await sb.from("tasks").update({checklist:list}).eq("id",id);
+      const {error}=await sb.rpc("week_set_task_checklist",{p_task_id:id,p_checklist:list});
       if(error){toast(error.message);renderChecklistModal(t);return}
       t.checklist=list;await reloadCloud();
     }
@@ -1499,7 +1540,7 @@
     const wasDone=t.status==="done";
     if(state.demo){const original=demoData.tasks.find(x=>x.id===id);if(original)original.status=checked?"done":"open";saveDemo();loadDemo()}
     else{
-      const {error}=await sb.from("tasks").update({status:checked?"done":"open"}).eq("id",id);
+      const {error}=await sb.rpc("week_set_task_status",{p_task_id:id,p_status:checked?"done":"open"});
       if(error){toast(error.message);return}
     }
     // A day counts when the user completes at least one task. School schedule
@@ -1538,7 +1579,7 @@
       <strong>${esc(r.title)}</strong>
       ${taskDetails(r)}
       <p>${esc(r.description||'Без описания')}</p>
-      <div class="actions"><button class="primary" onclick="window.acceptRequest('${r.id}')">Принять</button><button class="secondary" onclick="window.rejectRequest('${r.id}')">Отклонить</button><button class="secondary" onclick="window.counterRequest('${r.id}')">Предложить другое время</button></div>
+      <div class="actions"><button class="primary" data-action="request-accept" data-id="${esc(r.id)}">Принять</button><button class="secondary" data-action="request-reject" data-id="${esc(r.id)}">Отклонить</button><button class="secondary" data-action="request-counter" data-id="${esc(r.id)}">Предложить другое время</button></div>
     </div>`).join(''):'<p class="muted">Новых входящих предложений нет.</p>';
     const statusNames={pending:'Ожидает ответа',accepted:'Принято',rejected:'Отклонено'};
     outgoing.innerHTML=state.sentRequests.length?state.sentRequests.map(r=>`<div class="request-card"${taskColorAttr(r)}>
@@ -1594,15 +1635,15 @@
     if(!username){$("friendSearchResult").innerHTML='<p class="muted small">Введи username.</p>';return}
     if(state.demo){
       const found=demoData.profiles.find(p=>(p.username||p.display_name.toLowerCase())===username && p.id!==currentUserId());
-      $("friendSearchResult").innerHTML=found?`<div class="friend-result"><div><strong>${esc(found.display_name)}</strong><div class="small muted">@${esc(found.username||username)}</div></div><button class="primary" onclick="window.demoAddFriend('${found.id}')">Добавить</button></div>`:'<p class="muted small">Пользователь не найден.</p>';
+      $("friendSearchResult").innerHTML=found?`<div class="friend-result"><div><strong>${esc(found.display_name)}</strong><div class="small muted">@${esc(found.username||username)}</div></div><button class="primary" data-action="friend-demo-add" data-id="${esc(found.id)}">Добавить</button></div>`:'<p class="muted small">Пользователь не найден.</p>';
       return;
     }
-    const {data,error}=await sb.from("public_profiles").select("id,display_name,username").eq("username",username).neq("id",state.user.id).maybeSingle();
+    const {data,error}=await sb.rpc("week_find_profile_by_username",{p_username:username}).maybeSingle();
     if(error){toast(error.message);return}
     if(!data){$("friendSearchResult").innerHTML='<p class="muted small">Пользователь не найден.</p>';return}
     if(friendById(data.id)){$("friendSearchResult").innerHTML='<p class="muted small">Этот пользователь уже у тебя в друзьях.</p>';return}
     const already=state.sentFriendRequests.some(r=>r.to_user_id===data.id)||state.friendRequests.some(r=>r.from_user_id===data.id);
-    $("friendSearchResult").innerHTML=already?`<div class="friend-result"><div><strong>${esc(data.display_name)}</strong><div class="small muted">@${esc(data.username||"")}</div></div><span class="small muted">Заявка уже отправлена</span></div>`:`<div class="friend-result"><div><strong>${esc(data.display_name)}</strong><div class="small muted">@${esc(data.username||"")}</div></div><button class="primary" data-friend-id="${data.id}" onclick="window.sendFriendRequest('${data.id}')">Добавить</button></div>`;
+    $("friendSearchResult").innerHTML=already?`<div class="friend-result"><div><strong>${esc(data.display_name)}</strong><div class="small muted">@${esc(data.username||"")}</div></div><span class="small muted">Заявка уже отправлена</span></div>`:`<div class="friend-result"><div><strong>${esc(data.display_name)}</strong><div class="small muted">@${esc(data.username||"")}</div></div><button class="primary" data-friend-id="${esc(data.id)}" data-action="friend-send" data-id="${esc(data.id)}">Добавить</button></div>`;
   }
 
   window.sendFriendRequest=async id=>{
@@ -1875,7 +1916,7 @@
       const own=items.filter(i=>Number(i.day_of_week)===day);
       if(!own.length)return "";
       const label=DAY_OPTIONS.find(x=>Number(x[0])===day)?.[1]||"";
-      return `<div class="class-day"><strong>${label}</strong><div>${own.map(i=>`<div class="class-lesson"><span>${esc(String(i.start_time).slice(0,5))}–${esc(String(i.end_time).slice(0,5))}</span><b>${esc(i.title)}</b>${admin?`<button type="button" class="secondary class-edit-one" onclick="window.openClassLessonEdit('${i.id}')">Изменить</button>`:""}</div>`).join("")}</div></div>`;
+      return `<div class="class-day"><strong>${label}</strong><div>${own.map(i=>`<div class="class-lesson"><span>${esc(String(i.start_time).slice(0,5))}–${esc(String(i.end_time).slice(0,5))}</span><b>${esc(i.title)}</b>${admin?`<button type="button" class="secondary class-edit-one" data-action="class-lesson-edit" data-id="${esc(i.id)}">Изменить</button>`:""}</div>`).join("")}</div></div>`;
     }).join(""):'<p class="small muted">Расписание ещё не заполнено.</p>';
     const upcoming=(state.classExceptions||[]).filter(x=>x.class_id===group.id&&x.lesson_date>=iso(new Date()))
       .sort((a,b)=>a.lesson_date.localeCompare(b.lesson_date)).slice(0,12);
@@ -1894,10 +1935,10 @@
       else if(friendById(f.id))action='<span class="small muted">В друзьях</span>';
       else{
         const incoming=state.friendRequests.find(r=>r.from_user_id===f.id),outgoing=state.sentFriendRequests.some(r=>r.to_user_id===f.id);
-        action=incoming?`<button class="primary" onclick="window.acceptFriend('${incoming.id}')">Принять</button>`:
-          outgoing?'<span class="small muted">Заявка отправлена</span>':`<button class="secondary" onclick="window.sendFriendRequest('${f.id}')">+ В друзья</button>`;
+        action=incoming?`<button class="primary" data-action="friend-accept" data-id="${esc(incoming.id)}">Принять</button>`:
+          outgoing?'<span class="small muted">Заявка отправлена</span>':`<button class="secondary" data-action="friend-send" data-id="${esc(f.id)}">+ В друзья</button>`;
       }
-      return `<div class="friend-row"><div class="avatar mini">${esc((f.display_name||"П").slice(0,1).toUpperCase())}</div><div class="class-member-name"><strong>${esc(f.display_name)}</strong><div class="small muted">@${esc(f.username||"")}</div><div class="class-role-label">${esc(CLASS_ROLE_LABELS[f.role]||CLASS_ROLE_LABELS.student)}</div></div><div class="actions">${admin?`<select class="class-role-select" aria-label="Звание участника ${esc(f.display_name)}" onchange="window.setClassMemberRole('${f.id}',this.value)">${Object.entries(CLASS_ROLE_LABELS).map(([v,n])=>`<option value="${v}" ${v===(f.role||"student")?"selected":""}>${n}</option>`).join("")}</select>`:""}${action}</div></div>`;
+      return `<div class="friend-row"><div class="avatar mini">${esc((f.display_name||"П").slice(0,1).toUpperCase())}</div><div class="class-member-name"><strong>${esc(f.display_name)}</strong><div class="small muted">@${esc(f.username||"")}</div><div class="class-role-label">${esc(CLASS_ROLE_LABELS[f.role]||CLASS_ROLE_LABELS.student)}</div></div><div class="actions">${admin?`<select class="class-role-select" aria-label="Звание участника ${esc(f.display_name)}" data-change-action="class-role" data-id="${esc(f.id)}">${Object.entries(CLASS_ROLE_LABELS).map(([v,n])=>`<option value="${v}" ${v===(f.role||"student")?"selected":""}>${n}</option>`).join("")}</select>`:""}${action}</div></div>`;
     }).join(""):'<p class="small muted">Пока участников нет.</p>';
   }
 
@@ -2008,15 +2049,15 @@
   }
   function renderFriends(){
     const list=$("friendsList"), req=$("friendRequestsList"), sent=$("sentFriendRequestsList");
-    list.innerHTML=state.friends.length?state.friends.map(f=>`<div class="friend-row"><div class="avatar mini">${esc((f.display_name||"П").slice(0,1).toUpperCase())}</div><div><strong>${esc(f.display_name)}</strong><div class="small muted">@${esc(f.username||"")}</div></div><div class="actions"><button class="secondary" onclick="window.unfriend('${f.id}')">Удалить</button></div></div>`).join(""):'<p class="muted small">Пока нет друзей.</p>';
-    req.innerHTML=state.friendRequests.length?state.friendRequests.map(r=>{const f=(state.__profiles||[]).find(x=>x.id===r.from_user_id);return `<div class="friend-row"><div><strong>${esc(f?.display_name||"Новый друг")}</strong></div><div class="actions"><button class="primary" onclick="window.acceptFriend('${r.id}')">Принять</button><button class="secondary" onclick="window.rejectFriend('${r.id}')">Отклонить</button></div></div>`}).join(""):'<p class="muted small">Новых заявок нет.</p>';
-    if(sent)sent.innerHTML=state.sentFriendRequests.length?state.sentFriendRequests.map(r=>{const f=(state.__profiles||[]).find(x=>x.id===r.to_user_id);return `<div class="friend-row"><div><strong>${esc(f?.display_name||"Пользователь")}</strong><div class="small muted">Ожидает ответа</div></div><div class="actions"><button class="secondary" onclick="window.cancelFriendRequest('${r.id}')">Отменить</button></div></div>`}).join(""):'<p class="muted small">Отправленных заявок нет.</p>';
+    list.innerHTML=state.friends.length?state.friends.map(f=>`<div class="friend-row"><div class="avatar mini">${esc((f.display_name||"П").slice(0,1).toUpperCase())}</div><div><strong>${esc(f.display_name)}</strong><div class="small muted">@${esc(f.username||"")}</div></div><div class="actions"><button class="secondary" data-action="friend-unfriend" data-id="${esc(f.id)}">Удалить</button></div></div>`).join(""):'<p class="muted small">Пока нет друзей.</p>';
+    req.innerHTML=state.friendRequests.length?state.friendRequests.map(r=>{const f=(state.__profiles||[]).find(x=>x.id===r.from_user_id);return `<div class="friend-row"><div><strong>${esc(f?.display_name||"Новый друг")}</strong></div><div class="actions"><button class="primary" data-action="friend-accept" data-id="${esc(r.id)}">Принять</button><button class="secondary" data-action="friend-reject" data-id="${esc(r.id)}">Отклонить</button></div></div>`}).join(""):'<p class="muted small">Новых заявок нет.</p>';
+    if(sent)sent.innerHTML=state.sentFriendRequests.length?state.sentFriendRequests.map(r=>{const f=(state.__profiles||[]).find(x=>x.id===r.to_user_id);return `<div class="friend-row"><div><strong>${esc(f?.display_name||"Пользователь")}</strong><div class="small muted">Ожидает ответа</div></div><div class="actions"><button class="secondary" data-action="friend-cancel" data-id="${esc(r.id)}">Отменить</button></div></div>`}).join(""):'<p class="muted small">Отправленных заявок нет.</p>';
     $("friendBadge").textContent=state.friendRequests.length;$("friendBadge").classList.toggle("hidden",!state.friendRequests.length);
     fillFriendPicker($("taskFriend")?.value||state.friends[0]?.id||"");
   }
 
   function renderTemplates(){
-    $("templatesList").innerHTML=state.templates.length?state.templates.map(t=>`<div class="template"><strong>${esc(t.title)}</strong><div class="task-meta">${esc(t.category)} • ${t.duration} мин • ${priorityLabel(t.priority)}</div><button class="secondary" style="margin-top:12px" onclick="window.useTemplate('${t.id}')">Добавить в неделю</button></div>`).join(""):"<p class='muted'>Шаблонов пока нет.</p>";
+    $("templatesList").innerHTML=state.templates.length?state.templates.map(t=>`<div class="template"><strong>${esc(t.title)}</strong><div class="task-meta">${esc(t.category)} • ${t.duration} мин • ${priorityLabel(t.priority)}</div><button class="secondary" style="margin-top:12px" data-action="template-use" data-id="${esc(t.id)}">Добавить в неделю</button></div>`).join(""):"<p class='muted'>Шаблонов пока нет.</p>";
   }
   window.useTemplate=id=>{
     const t=state.templates.find(x=>x.id===id);if(!t)return;
